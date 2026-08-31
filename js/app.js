@@ -246,7 +246,7 @@ async function renderHome() {
     monthTotal
   );
 
-  renderCategoryDonut(expenses, monthTotal);
+  renderCategoryDonut(expenses);
   await renderHomeCardStrip();
   await renderTransfersList();
 }
@@ -603,8 +603,9 @@ function renderTrendChart(expenses, monthStart, now) {
   let running = 0;
   const cumulative = dailyTotals.map((v) => (running += v));
   const labels = cumulative.map((_, i) => String(i + 1));
+  const pointRadii = dailyTotals.map((v) => (v > 0 ? 5 : 0));
 
-  document.getElementById('trend-days-label').textContent = `${daysInView} días`;
+  document.getElementById('trend-days-label').textContent = `${daysInView} días · toca un punto para ver el gasto`;
 
   const ctx = document.getElementById('trend-chart');
   if (charts.trend) charts.trend.destroy();
@@ -617,8 +618,11 @@ function renderTrendChart(expenses, monthStart, now) {
         borderColor: '#3987e5',
         backgroundColor: 'rgba(57,135,229,0.18)',
         borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
+        pointRadius: pointRadii,
+        pointHoverRadius: 7,
+        pointBackgroundColor: '#3987e5',
+        pointBorderColor: '#0b1220',
+        pointBorderWidth: 2,
         tension: 0.35,
         fill: true,
       }],
@@ -626,12 +630,24 @@ function renderTrendChart(expenses, monthStart, now) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const idx = elements[0].index;
+        if (dailyTotals[idx] <= 0) return;
+        const d = new Date(monthStart);
+        d.setDate(idx + 1);
+        showDayExpensesModal(d.toISOString().slice(0, 10));
+      },
+      onHover: (evt, elements) => {
+        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
             title: (items) => `Día ${items[0].label}`,
             label: (item) => fmtMoney(item.parsed.y),
+            afterLabel: (item) => (dailyTotals[item.dataIndex] > 0 ? 'Toca para ver el detalle' : ''),
           },
         },
       },
@@ -643,12 +659,89 @@ function renderTrendChart(expenses, monthStart, now) {
   });
 }
 
-function renderCategoryDonut(expenses, monthTotal) {
+function showDayExpensesModal(dateISO) {
+  const dayExpenses = state.expensesCache.filter((e) => e.expense_date === dateISO);
+  const dayTotal = dayExpenses.reduce((s, e) => s + Number(e.amount), 0);
+  const rows = dayExpenses
+    .map(
+      (exp) => `
+      <div class="list-row" data-id="${exp.id}" style="cursor:pointer;">
+        <div class="row-main">
+          <span class="color-dot" style="background:${exp.categories?.color || '#6b7280'}"></span>
+          <div>
+            <div>${exp.categories?.icon || '💸'} ${escapeHtml(exp.merchant || exp.categories?.name || 'Gasto')}</div>
+            <div class="row-sub">${escapeHtml(exp.categories?.name || '')}${exp.payment_methods ? ' · ' + escapeHtml(exp.payment_methods.name) : ''}</div>
+          </div>
+        </div>
+        <strong>${fmtMoney(exp.amount)}</strong>
+      </div>`
+    )
+    .join('');
+  const overlay = openModal(`
+    <h3>${fmtDateLong(dateISO)}</h3>
+    <p class="helper-text">Total del día: ${fmtMoney(dayTotal)}</p>
+    ${rows || '<p class="empty-state">Sin gastos ese día.</p>'}
+  `);
+  overlay.querySelectorAll('.list-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      const exp = dayExpenses.find((e) => e.id === row.dataset.id);
+      if (exp) openExpenseDetail(exp);
+    });
+  });
+}
+
+let categoryFilterMethodId = null;
+
+function renderCategoryDonut(expenses) {
+  categoryFilterMethodId = null;
+  renderCategoryMethodFilter(expenses);
+  renderCategorySection(expenses);
+}
+
+function renderCategoryMethodFilter(allExpenses) {
+  const filterRow = document.getElementById('category-method-filter');
+  filterRow.innerHTML = '';
+
+  const usedMethodIds = new Set(allExpenses.map((e) => e.payment_method_id).filter(Boolean));
+  const methods = state.paymentMethods.filter((m) => usedMethodIds.has(m.id));
+  if (methods.length < 2) {
+    filterRow.classList.add('hidden');
+    return;
+  }
+  filterRow.classList.remove('hidden');
+
+  const allPill = el(`<div class="pill selected" data-id="">Todos</div>`);
+  allPill.addEventListener('click', () => selectCategoryFilter(null, allExpenses));
+  filterRow.appendChild(allPill);
+
+  for (const m of methods) {
+    const pill = el(`<div class="pill" data-id="${m.id}">${escapeHtml(m.name)}</div>`);
+    pill.addEventListener('click', () => selectCategoryFilter(m.id, allExpenses));
+    filterRow.appendChild(pill);
+  }
+}
+
+function selectCategoryFilter(methodId, allExpenses) {
+  categoryFilterMethodId = methodId;
+  document.querySelectorAll('#category-method-filter .pill').forEach((p) => {
+    p.classList.toggle('selected', (p.dataset.id || null) === methodId);
+  });
+  renderCategorySection(allExpenses);
+}
+
+function renderCategorySection(allExpenses) {
+  const expenses = categoryFilterMethodId
+    ? allExpenses.filter((e) => e.payment_method_id === categoryFilterMethodId)
+    : allExpenses;
+  const filteredTotal = expenses.reduce((s, e) => s + Number(e.amount), 0);
+
   const groups = groupSum(expenses, (e) => e.categories?.name || 'Sin categoría', () => null, (e) => e.categories?.icon || '💸');
   const emptyEl = document.getElementById('category-empty');
   const rowEl = document.getElementById('category-donut-row');
   const legend = document.getElementById('category-legend');
+  const detailList = document.getElementById('category-expense-list');
   legend.innerHTML = '';
+  detailList.innerHTML = '';
 
   const ctx = document.getElementById('category-donut');
   if (charts.donut) { charts.donut.destroy(); charts.donut = null; }
@@ -686,7 +779,7 @@ function renderCategoryDonut(expenses, monthTotal) {
   });
 
   for (const g of colored) {
-    const pct = monthTotal > 0 ? Math.round((g.total / monthTotal) * 100) : 0;
+    const pct = filteredTotal > 0 ? Math.round((g.total / filteredTotal) * 100) : 0;
     legend.appendChild(el(`
       <div class="legend-row">
         <span class="legend-dot" style="background:${g.color}"></span>
@@ -694,6 +787,24 @@ function renderCategoryDonut(expenses, monthTotal) {
         <span class="legend-amount">${fmtMoney(g.total)} · ${pct}%</span>
       </div>
     `));
+  }
+
+  const sorted = [...expenses].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1));
+  for (const exp of sorted) {
+    const row = el(`
+      <div class="list-row" style="cursor:pointer;">
+        <div class="row-main">
+          <span class="color-dot" style="background:${exp.categories?.color || '#6b7280'}"></span>
+          <div>
+            <div>${exp.categories?.icon || '💸'} ${escapeHtml(exp.merchant || exp.categories?.name || 'Gasto')}</div>
+            <div class="row-sub">${fmtDate(exp.expense_date)}${exp.payment_methods ? ' · ' + escapeHtml(exp.payment_methods.name) : ' · sin método'}</div>
+          </div>
+        </div>
+        <strong>${fmtMoney(exp.amount)}</strong>
+      </div>
+    `);
+    row.addEventListener('click', () => openExpenseDetail(exp));
+    detailList.appendChild(row);
   }
 }
 

@@ -161,11 +161,14 @@
 
     <div class="card">
       <h3>Gasto por categoría</h3>
+      <div class="pill-row" id="category-method-filter" style="margin-bottom:12px;"></div>
       <div class="donut-row" id="category-donut-row">
         <div class="chart-box chart-box-donut"><canvas id="category-donut"></canvas></div>
         <div class="legend-col" id="category-legend"></div>
       </div>
       <p class="empty-state hidden" id="category-empty">Aún no hay gastos este mes.</p>
+      <div class="section-title" id="category-detail-title" style="margin-left:0;">Detalle</div>
+      <div id="category-expense-list"></div>
     </div>
 
     <div class="card">
