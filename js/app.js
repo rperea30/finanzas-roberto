@@ -303,7 +303,7 @@ function wireTransferButton() {
   document.getElementById('btn-transfer-to-wallet').addEventListener('click', () => openTransferModal());
 }
 
-function openTransferModal() {
+function openTransferModal(presetDestId) {
   if (!state.incomeSources.length) {
     showToast('Primero agrega un ingreso (ej. Salario) en Ajustes.', 'error');
     return;
@@ -314,7 +314,7 @@ function openTransferModal() {
   }
   const sourceOptions = state.incomeSources.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
   const destOptions = state.paymentMethods
-    .map((m) => `<option value="${m.id}">${escapeHtml(m.name)} (${labelType(m.type)})</option>`)
+    .map((m) => `<option value="${m.id}"${m.id === presetDestId ? ' selected' : ''}>${escapeHtml(m.name)} (${labelType(m.type)})</option>`)
     .join('');
   const overlay = openModal(`
     <h3>Transferir ingreso</h3>
@@ -625,16 +625,20 @@ function renderMonthSummaryAndCycleTables(allExpenses, monthStart, monthEnd) {
     const pct = r.limit > 0 ? (r.monthSpent / r.limit) * 100 : 0;
     const available = r.limit - r.monthSpent;
     const est = estadoChip(pct);
-    monthBody.appendChild(el(`
-      <tr>
-        <td><span class="color-dot" style="background:${r.m.color}"></span>${escapeHtml(r.m.name)}</td>
+    const isCashLike = r.m.type === 'cash' || r.m.type === 'wallet';
+    const row = el(`
+      <tr style="--row-color:${r.m.color}">
+        <td><span class="color-dot" style="background:${r.m.color}"></span>${escapeHtml(r.m.name)}${isCashLike ? '<button type="button" class="fund-btn" data-fund="' + r.m.id + '">➕ agregar</button>' : ''}</td>
         <td>${fmtMoney(r.limit)}</td>
         <td>${fmtMoney(r.monthSpent)}</td>
         <td class="${available < 0 ? 'neg' : ''}">${fmtMoney(available)}</td>
         <td>${Math.round(pct)}%</td>
         <td><span class="chip status-${est.cls}">${est.text}</span></td>
       </tr>
-    `));
+    `);
+    const fundBtn = row.querySelector('[data-fund]');
+    if (fundBtn) fundBtn.addEventListener('click', (e) => { e.stopPropagation(); openTransferModal(r.m.id); });
+    monthBody.appendChild(row);
   }
   summaryContainer.appendChild(monthTable);
 
@@ -651,9 +655,10 @@ function renderMonthSummaryAndCycleTables(allExpenses, monthStart, monthEnd) {
     const pct = r.limit > 0 ? (r.cycleSpent / r.limit) * 100 : 0;
     const available = r.limit - r.cycleSpent;
     const est = estadoChip(pct);
-    cycleBody.appendChild(el(`
-      <tr>
-        <td><span class="color-dot" style="background:${r.m.color}"></span>${escapeHtml(r.m.name)}</td>
+    const isCashLike = r.m.type === 'cash' || r.m.type === 'wallet';
+    const row = el(`
+      <tr style="--row-color:${r.m.color}">
+        <td><span class="color-dot" style="background:${r.m.color}"></span>${escapeHtml(r.m.name)}${isCashLike ? '<button type="button" class="fund-btn" data-fund="' + r.m.id + '">➕ agregar</button>' : ''}</td>
         <td>${fmtDate(r.cycle.start.toISOString().slice(0, 10))}</td>
         <td>${fmtDate(r.cycle.end.toISOString().slice(0, 10))}</td>
         <td>${fmtMoney(r.cycleSpent)}</td>
@@ -661,7 +666,10 @@ function renderMonthSummaryAndCycleTables(allExpenses, monthStart, monthEnd) {
         <td class="${available < 0 ? 'neg' : ''}">${fmtMoney(available)}</td>
         <td><span class="chip status-${est.cls}">${est.text}</span></td>
       </tr>
-    `));
+    `);
+    const fundBtn = row.querySelector('[data-fund]');
+    if (fundBtn) fundBtn.addEventListener('click', (e) => { e.stopPropagation(); openTransferModal(r.m.id); });
+    cycleBody.appendChild(row);
   }
   cycleContainer.appendChild(cycleTable);
 }

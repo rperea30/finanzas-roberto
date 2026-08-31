@@ -484,10 +484,10 @@ a { color: var(--accent); }
   font-size: 13px;
 }
 .excel-table th {
-  background: #16305c;
+  background: linear-gradient(135deg, #1a3a6e 0%, #12294f 100%);
   color: #dbe8ff;
   text-align: left;
-  padding: 9px 10px;
+  padding: 10px 10px;
   font-weight: 700;
   white-space: nowrap;
   position: sticky;
@@ -499,8 +499,21 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 .excel-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+.excel-table tbody tr:hover { background: rgba(255,255,255,0.06); }
+.excel-table td:first-child { border-left: 3px solid var(--row-color, transparent); }
 .excel-table td .color-dot { display: inline-block; margin-right: 6px; vertical-align: middle; }
 .excel-table td.neg { color: var(--status-critical); font-weight: 700; }
+.excel-table .fund-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
 
 /* ---------- Month tabs (como las pestañas del Excel) ---------- */
 .month-tabs {
@@ -864,16 +877,13 @@ a { color: var(--accent); }
     max-width: 1180px;
   }
 
-  #view-home {
+  .home-2col {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
     align-items: start;
   }
-  #view-home > .hero-card,
-  #view-home > .stat-grid {
-    grid-column: 1 / -1;
-  }
+  .home-2col > .card { margin-bottom: 0; }
 
   .month-nav { max-width: 1180px; }
 
