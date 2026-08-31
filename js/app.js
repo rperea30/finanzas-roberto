@@ -247,7 +247,6 @@ async function renderHome() {
     monthTotal
   );
 
-  renderCategoryDonut(expenses);
   state.detailMonth = startOfMonth(new Date());
   await renderExpenseDetailSection();
   await renderHomeCardStrip();
@@ -693,10 +692,6 @@ function showDayExpensesModal(dateISO) {
   });
 }
 
-function renderCategoryDonut(expenses) {
-  renderCategoryTotalSection(expenses);
-}
-
 function wireDetailNav() {
   document.getElementById('detail-prev-month').addEventListener('click', () => {
     state.detailMonth = addMonths(state.detailMonth, -1);
@@ -714,57 +709,63 @@ async function renderExpenseDetailSection() {
   const to = addMonths(state.detailMonth, 1).toISOString().slice(0, 10);
 
   let monthExpenses = [];
-  let monthIncome = [];
   try {
-    [monthExpenses, monthIncome] = await Promise.all([
-      data.fetchExpenses(state.household.id, { from, to }),
-      data.fetchIncomeEntries(state.household.id, { from, to }).catch(() => []),
-    ]);
+    monthExpenses = await data.fetchExpenses(state.household.id, { from, to });
   } catch (err) {
     showToast('Error cargando el detalle: ' + err.message, 'error');
     return;
   }
 
-  renderDailyFlowChart(monthExpenses, monthIncome, state.detailMonth);
+  renderDailyFlowChart(monthExpenses, state.detailMonth);
   renderCategoryByMethod(monthExpenses);
 }
 
-function renderDailyFlowChart(monthExpenses, monthIncome, monthStart) {
+function renderDailyFlowChart(monthExpenses, monthStart) {
   const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
-  const gastoByDay = new Array(daysInMonth).fill(0);
-  const ingresoByDay = new Array(daysInMonth).fill(0);
-
-  for (const e of monthExpenses) {
-    const day = Number(e.expense_date.slice(8, 10));
-    if (day >= 1 && day <= daysInMonth) gastoByDay[day - 1] += Number(e.amount);
-  }
-  for (const inc of monthIncome) {
-    const day = Number(inc.entry_date.slice(8, 10));
-    if (day >= 1 && day <= daysInMonth) ingresoByDay[day - 1] += Number(inc.amount);
-  }
+  const usedMethodIds = [...new Set(monthExpenses.map((e) => e.payment_method_id).filter(Boolean))];
+  const methods = state.paymentMethods.filter((m) => usedMethodIds.includes(m.id));
 
   const labels = Array.from({ length: daysInMonth }, (_, i) => String(i + 1));
+  const datasets = methods.map((m) => {
+    const byDay = new Array(daysInMonth).fill(0);
+    for (const e of monthExpenses) {
+      if (e.payment_method_id !== m.id) continue;
+      const day = Number(e.expense_date.slice(8, 10));
+      if (day >= 1 && day <= daysInMonth) byDay[day - 1] += Number(e.amount);
+    }
+    return { label: m.name, data: byDay, backgroundColor: m.color, borderRadius: 3, barPercentage: 0.7 };
+  });
+
+  const legend = document.getElementById('daily-flow-legend');
+  legend.innerHTML = methods
+    .map((m) => `<div class="legend-row" style="width:auto;"><span class="legend-dot" style="background:${m.color}"></span><span class="legend-name" style="white-space:nowrap;">${escapeHtml(m.name)}</span></div>`)
+    .join('');
+
   const ctx = document.getElementById('daily-flow-chart');
   if (charts.dailyFlow) charts.dailyFlow.destroy();
   charts.dailyFlow = new Chart(ctx, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Ingreso', data: ingresoByDay, backgroundColor: '#0ca30c', borderRadius: 3, barPercentage: 0.7 },
-        { label: 'Gasto', data: gastoByDay, backgroundColor: '#e66767', borderRadius: 3, barPercentage: 0.7 },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const idx = elements[0].index;
+        const d = new Date(monthStart);
+        d.setDate(idx + 1);
+        showDayExpensesModal(d.toISOString().slice(0, 10));
+      },
+      onHover: (evt, elements) => {
+        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+      },
       plugins: {
-        legend: { position: 'top', labels: { color: '#e6ecf5', boxWidth: 12, font: { size: 11 } } },
+        legend: { display: false },
         tooltip: { callbacks: { title: (items) => `Día ${items[0].label}`, label: (item) => `${item.dataset.label}: ${fmtMoney(item.parsed.y)}` } },
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#93a4c3', font: { size: 9 } } },
-        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#93a4c3', font: { size: 10 }, callback: (v) => '$' + v } },
+        x: { stacked: true, grid: { display: false }, ticks: { color: '#93a4c3', font: { size: 9 } } },
+        y: { stacked: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#93a4c3', font: { size: 10 }, callback: (v) => '$' + v } },
       },
     },
   });
@@ -817,62 +818,6 @@ function renderCategoryByMethod(allExpenses) {
 
     container.appendChild(card);
   }
-}
-
-function renderCategoryTotalSection(expenses) {
-  const filteredTotal = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const groups = groupSum(expenses, (e) => e.categories?.name || 'Sin categoría', () => null, (e) => e.categories?.icon || '💸');
-  const emptyEl = document.getElementById('category-empty');
-  const rowEl = document.getElementById('category-donut-row');
-  const legend = document.getElementById('category-legend');
-  legend.innerHTML = '';
-
-  const ctx = document.getElementById('category-donut');
-  if (charts.donut) { charts.donut.destroy(); charts.donut = null; }
-
-  if (!groups.length) {
-    emptyEl.classList.remove('hidden');
-    rowEl.classList.add('hidden');
-    return;
-  }
-  emptyEl.classList.add('hidden');
-  rowEl.classList.remove('hidden');
-
-  const colored = groups.map((g, i) => ({ ...g, color: paletteColor(i) }));
-
-  charts.donut = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: colored.map((g) => g.name),
-      datasets: [{
-        data: colored.map((g) => g.total),
-        backgroundColor: colored.map((g) => g.color),
-        borderColor: '#141f38',
-        borderWidth: 2,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '68%',
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (item) => `${item.label}: ${fmtMoney(item.parsed)}` } },
-      },
-    },
-  });
-
-  for (const g of colored) {
-    const pct = filteredTotal > 0 ? Math.round((g.total / filteredTotal) * 100) : 0;
-    legend.appendChild(el(`
-      <div class="legend-row">
-        <span class="legend-dot" style="background:${g.color}"></span>
-        <span class="legend-name">${escapeHtml(g.name)}</span>
-        <span class="legend-amount">${fmtMoney(g.total)} · ${pct}%</span>
-      </div>
-    `));
-  }
-
 }
 
 async function renderHomeCardStrip() {

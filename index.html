@@ -160,22 +160,14 @@
     </div>
 
     <div class="card">
-      <h3>Gasto por categoría — total del mes</h3>
-      <div class="donut-row" id="category-donut-row">
-        <div class="chart-box chart-box-donut"><canvas id="category-donut"></canvas></div>
-        <div class="legend-col" id="category-legend"></div>
-      </div>
-      <p class="empty-state hidden" id="category-empty">Aún no hay gastos este mes.</p>
-    </div>
-
-    <div class="card">
       <div class="month-nav" style="margin-bottom:8px;">
         <button class="icon-btn" id="detail-prev-month">‹</button>
         <div class="month-nav-label" id="detail-month-label"></div>
         <button class="icon-btn" id="detail-next-month">›</button>
       </div>
-      <h3 style="margin-top:0;">📅 Ingreso vs Gasto por día</h3>
+      <h3 style="margin-top:0;">💳 Gasto por tarjeta, por día</h3>
       <div class="chart-box" style="height:220px;"><canvas id="daily-flow-chart"></canvas></div>
+      <div class="legend-col" id="daily-flow-legend" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-top:10px;"></div>
     </div>
 
     <div id="category-by-method"></div>
