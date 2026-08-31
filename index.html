@@ -187,7 +187,10 @@
   <!-- ---------- ADD / EDIT EXPENSE ---------- -->
   <section id="view-add" class="view hidden">
     <div class="card">
-      <h3 id="add-expense-title">Nuevo gasto</h3>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+        <button type="button" class="icon-btn" id="expense-back-btn" title="Volver">←</button>
+        <h3 id="add-expense-title" style="margin:0;">Nuevo gasto</h3>
+      </div>
       <form id="expense-form">
         <div class="field">
           <label>Monto (US$)</label>

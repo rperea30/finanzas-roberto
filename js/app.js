@@ -910,6 +910,9 @@ function renderExpenseFormOptions() {
     pill.addEventListener('click', () => selectPill('exp-category-pills', c.id));
     catContainer.appendChild(pill);
   }
+  const addCatPill = el(`<div class="pill pill-add">+ Nueva categoría</div>`);
+  addCatPill.addEventListener('click', () => openCategoryModal(true));
+  catContainer.appendChild(addCatPill);
   if (state.categories[0] && !state.editingExpenseId) selectPill('exp-category-pills', state.categories[0].id);
 
   const methodContainer = document.getElementById('exp-method-pills');
@@ -919,9 +922,10 @@ function renderExpenseFormOptions() {
     pill.addEventListener('click', () => selectPill('exp-method-pills', m.id));
     methodContainer.appendChild(pill);
   }
-  if (!state.paymentMethods.length) {
-    methodContainer.appendChild(el(`<p class="helper-text">Agrega un método de pago en Ajustes primero.</p>`));
-  } else if (state.paymentMethods[0] && !state.editingExpenseId) {
+  const addMethodPill = el(`<div class="pill pill-add">+ Nuevo método</div>`);
+  addMethodPill.addEventListener('click', () => openMethodModal(true));
+  methodContainer.appendChild(addMethodPill);
+  if (state.paymentMethods[0] && !state.editingExpenseId) {
     selectPill('exp-method-pills', state.paymentMethods[0].id);
   }
 }
@@ -958,6 +962,13 @@ function wireExpenseForm() {
     state.editingExpenseId = null;
     resetExpenseForm();
     setActiveView('history');
+  });
+
+  document.getElementById('expense-back-btn').addEventListener('click', () => {
+    const wasEditing = !!state.editingExpenseId;
+    state.editingExpenseId = null;
+    resetExpenseForm();
+    setActiveView(wasEditing ? 'history' : 'home');
   });
 
   document.getElementById('expense-form').addEventListener('submit', async (e) => {
@@ -1350,7 +1361,7 @@ function labelType(t) {
   return { credit_card: 'Tarjeta de crédito', debit_card: 'Tarjeta de débito', cash: 'Efectivo', wallet: 'Billetera digital' }[t] || t;
 }
 
-function openMethodModal() {
+function openMethodModal(fromExpenseForm) {
   const overlay = openModal(`
     <h3>Nuevo método de pago</h3>
     <div class="field">
@@ -1398,7 +1409,7 @@ function openMethodModal() {
     const rateInput = overlay.querySelector('#pm-rate').value;
     const startingBalanceInput = overlay.querySelector('#pm-starting-balance').value;
     try {
-      await data.addPaymentMethod(state.household.id, {
+      const created = await data.addPaymentMethod(state.household.id, {
         name,
         type: overlay.querySelector('#pm-type').value,
         credit_limit: overlay.querySelector('#pm-limit').value || null,
@@ -1409,8 +1420,13 @@ function openMethodModal() {
       });
       await loadHouseholdData();
       closeModal();
-      renderSettings();
       showToast('Método agregado', 'success');
+      if (fromExpenseForm) {
+        renderExpenseFormOptions();
+        selectPill('exp-method-pills', created.id);
+      } else {
+        renderSettings();
+      }
     } catch (err) {
       overlay.querySelector('#pm-error').textContent = err.message;
     }
@@ -1463,7 +1479,7 @@ function openRecurringBillModal() {
   });
 }
 
-function openCategoryModal() {
+function openCategoryModal(fromExpenseForm) {
   const overlay = openModal(`
     <h3>Nueva categoría</h3>
     <div class="field">
@@ -1488,15 +1504,20 @@ function openCategoryModal() {
       return;
     }
     try {
-      await data.addCategory(state.household.id, {
+      const created = await data.addCategory(state.household.id, {
         name,
         icon: overlay.querySelector('#cat-icon').value.trim() || '💸',
         color: overlay.querySelector('#cat-color').value,
       });
       await loadHouseholdData();
       closeModal();
-      renderSettings();
       showToast('Categoría agregada', 'success');
+      if (fromExpenseForm) {
+        renderExpenseFormOptions();
+        selectPill('exp-category-pills', created.id);
+      } else {
+        renderSettings();
+      }
     } catch (err) {
       overlay.querySelector('#cat-error').textContent = err.message;
     }
