@@ -115,14 +115,8 @@
     </div>
 
     <div class="card">
-      <div class="card-head">
-        <h3>💵 Ingresos por mes</h3>
-        <div>
-          <button class="icon-btn" id="income-prev-month">‹</button>
-          <button class="icon-btn" id="income-next-month">›</button>
-        </div>
-      </div>
-      <div class="helper-text" id="income-month-label" style="margin-bottom:8px;"></div>
+      <h3>💵 Ingresos por mes</h3>
+      <div class="month-tabs" id="income-month-tabs"></div>
       <div id="income-sources-breakdown"></div>
       <p class="empty-state hidden" id="income-sources-empty">Sin ingresos registrados este mes.</p>
       <div class="section-title" id="income-entries-title" style="margin-left:0;"></div>
@@ -155,17 +149,14 @@
 
     <div class="card">
       <h3>Mis tarjetas</h3>
-      <div id="home-card-strip" class="card-strip"></div>
+      <p class="helper-text" style="margin-top:-2px;margin-bottom:10px;">Límite del ciclo actual — esto es lo que deberías revisar día a día.</p>
+      <div id="home-card-strip" class="big-card-list"></div>
       <p class="empty-state hidden" id="home-card-strip-empty">Agrega tarjetas en Ajustes para verlas aquí.</p>
     </div>
 
     <div class="card">
-      <div class="month-nav" style="margin-bottom:8px;">
-        <button class="icon-btn" id="detail-prev-month">‹</button>
-        <div class="month-nav-label" id="detail-month-label"></div>
-        <button class="icon-btn" id="detail-next-month">›</button>
-      </div>
       <h3 style="margin-top:0;">💳 Gasto por tarjeta, por día</h3>
+      <div class="month-tabs" id="detail-month-tabs"></div>
       <div class="chart-box" style="height:220px;"><canvas id="daily-flow-chart"></canvas></div>
       <div class="legend-col" id="daily-flow-legend" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-top:10px;"></div>
     </div>
@@ -244,11 +235,7 @@
 
   <!-- ---------- BILLS / TARJETAS (mensual) ---------- -->
   <section id="view-bills" class="view hidden">
-    <div class="month-nav">
-      <button class="icon-btn" id="bills-prev-month">‹</button>
-      <div class="month-nav-label" id="bills-month-label"></div>
-      <button class="icon-btn" id="bills-next-month">›</button>
-    </div>
+    <div class="month-tabs" id="bills-month-tabs"></div>
 
     <div class="stat-grid">
       <div class="stat-box">

@@ -469,6 +469,79 @@ a { color: var(--accent); }
   margin-top: 6px;
 }
 
+/* ---------- Month tabs (como las pestañas del Excel) ---------- */
+.month-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+.month-tab {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.month-tab.selected {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #86efac;
+}
+
+/* ---------- Big card with limit bar (Mis tarjetas en Inicio) ---------- */
+.big-card-list { display: flex; flex-direction: column; gap: 12px; }
+.big-card {
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.big-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--bc-color, #2563eb) 0%, transparent 65%);
+  opacity: 0.14;
+  pointer-events: none;
+}
+.big-card-top { display: flex; justify-content: space-between; align-items: center; position: relative; }
+.big-card-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.big-card-value { font-size: 24px; font-weight: 800; margin-top: 6px; position: relative; }
+.big-card-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; position: relative; }
+.big-card-track {
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  margin-top: 12px;
+  position: relative;
+}
+.big-card-track-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.big-card-track-fill.level-good { background: var(--status-good); }
+.big-card-track-fill.level-warning { background: var(--status-warning); }
+.big-card-track-fill.level-serious { background: var(--status-serious); }
+.big-card-track-fill.level-critical { background: var(--status-critical); }
+.big-card-track-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  position: relative;
+}
+
 /* ---------- Radial gauge (SVG) ---------- */
 .gauge-wrap { flex-shrink: 0; position: relative; width: 76px; height: 76px; }
 .gauge-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }

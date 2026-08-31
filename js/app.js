@@ -10,6 +10,22 @@ import * as data from './data.js';
 
 const charts = { trend: null, donut: null, dailyFlow: null };
 
+// Meses que existen en la app (igual que las pestañas del Excel: Jun-Dic 2026).
+const MONTH_TAB_OPTIONS = [5, 6, 7, 8, 9, 10, 11].map((m) => new Date(2026, m, 1));
+
+function renderMonthTabs(containerId, current, onSelect) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+  for (const m of MONTH_TAB_OPTIONS) {
+    const selected = m.getFullYear() === current.getFullYear() && m.getMonth() === current.getMonth();
+    const label = capitalize(m.toLocaleDateString('es-PA', { month: 'short' }).replace('.', ''));
+    const btn = el(`<button type="button" class="month-tab${selected ? ' selected' : ''}">${label}</button>`);
+    btn.addEventListener('click', () => onSelect(m));
+    container.appendChild(btn);
+  }
+}
+
 /* ======================================================================
    INIT
    ====================================================================== */
@@ -20,8 +36,6 @@ async function init() {
   wirePhotoInput();
   wireSettingsButtons();
   wireBillsNav();
-  wireIncomeNav();
-  wireDetailNav();
   wireTransferButton();
 
   const session = await auth.getSession();
@@ -324,7 +338,10 @@ function renderUnassignedCard(allIncomeEntries, allTransfers) {
 }
 
 async function renderIncomeMonthCard() {
-  document.getElementById('income-month-label').textContent = capitalize(monthLabel(state.incomeMonth));
+  renderMonthTabs('income-month-tabs', state.incomeMonth, (m) => {
+    state.incomeMonth = m;
+    renderIncomeMonthCard();
+  });
   const from = state.incomeMonth.toISOString().slice(0, 10);
   const to = addMonths(state.incomeMonth, 1).toISOString().slice(0, 10);
 
@@ -374,17 +391,6 @@ async function renderIncomeMonthCard() {
     });
     listEl.appendChild(row);
   }
-}
-
-function wireIncomeNav() {
-  document.getElementById('income-prev-month').addEventListener('click', () => {
-    state.incomeMonth = addMonths(state.incomeMonth, -1);
-    renderIncomeMonthCard();
-  });
-  document.getElementById('income-next-month').addEventListener('click', () => {
-    state.incomeMonth = addMonths(state.incomeMonth, 1);
-    renderIncomeMonthCard();
-  });
 }
 
 function wireTransferButton() {
@@ -692,19 +698,11 @@ function showDayExpensesModal(dateISO) {
   });
 }
 
-function wireDetailNav() {
-  document.getElementById('detail-prev-month').addEventListener('click', () => {
-    state.detailMonth = addMonths(state.detailMonth, -1);
-    renderExpenseDetailSection();
-  });
-  document.getElementById('detail-next-month').addEventListener('click', () => {
-    state.detailMonth = addMonths(state.detailMonth, 1);
-    renderExpenseDetailSection();
-  });
-}
-
 async function renderExpenseDetailSection() {
-  document.getElementById('detail-month-label').textContent = capitalize(monthLabel(state.detailMonth));
+  renderMonthTabs('detail-month-tabs', state.detailMonth, (m) => {
+    state.detailMonth = m;
+    renderExpenseDetailSection();
+  });
   const from = state.detailMonth.toISOString().slice(0, 10);
   const to = addMonths(state.detailMonth, 1).toISOString().slice(0, 10);
 
@@ -799,14 +797,26 @@ function renderCategoryByMethod(allExpenses) {
 
     const listEl = card.querySelector('.method-cat-list');
     const sorted = [...methodExpenses].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1));
+
+    let lastDay = null;
     for (const exp of sorted) {
+      if (exp.expense_date !== lastDay) {
+        lastDay = exp.expense_date;
+        const dayTotal = sorted.filter((e) => e.expense_date === lastDay).reduce((s, e) => s + Number(e.amount), 0);
+        listEl.appendChild(el(`
+          <div class="day-group-label" style="display:flex;justify-content:space-between;">
+            <span>${fmtDateLong(lastDay)}</span>
+            <span>Total del día: ${fmtMoney(dayTotal)}</span>
+          </div>
+        `));
+      }
       const row = el(`
         <div class="list-row" style="cursor:pointer;">
           <div class="row-main">
             <span class="color-dot" style="background:${exp.categories?.color || '#6b7280'}"></span>
             <div>
               <div>${exp.categories?.icon || '💸'} ${escapeHtml(exp.merchant || exp.categories?.name || 'Gasto')}</div>
-              <div class="row-sub">${fmtDate(exp.expense_date)}</div>
+              <div class="row-sub">${escapeHtml(exp.categories?.name || '')}</div>
             </div>
           </div>
           <strong>${fmtMoney(exp.amount)}</strong>
@@ -853,7 +863,7 @@ async function renderHomeCardStrip() {
     const isCashLike = m.type === 'cash' || m.type === 'wallet';
     const startingBalance = m.starting_balance != null ? Number(m.starting_balance) : null;
 
-    let amountLabel, subLabel, gaugePct;
+    let amountLabel, subLabel, gaugePct, trackLeftLabel, trackRightLabel;
     if (isCashLike) {
       const base = startingBalance || 0;
       const transferredIn = allTransfers.filter((t) => t.payment_method_id === m.id).reduce((s, t) => s + Number(t.amount), 0);
@@ -861,20 +871,35 @@ async function renderHomeCardStrip() {
       const funded = base + transferredIn;
       const available = Math.max(0, funded - spent);
       amountLabel = fmtMoney(available);
-      subLabel = funded > 0 ? `disponible de ${fmtMoney(funded)}` : `${fmtMoney(spent)} gastado`;
+      subLabel = funded > 0 ? 'disponible' : 'sin fondos asignados';
       gaugePct = funded > 0 ? (spent / funded) * 100 : 0;
+      trackLeftLabel = `${fmtMoney(spent)} gastado`;
+      trackRightLabel = `de ${fmtMoney(funded)}`;
     } else {
       amountLabel = fmtMoney(pending);
       subLabel = 'saldo pendiente';
-      gaugePct = m.credit_limit ? (pending / Number(m.credit_limit)) * 100 : (due > 0 ? (paid / due) * 100 : 0);
+      const limit = m.credit_limit ? Number(m.credit_limit) : null;
+      gaugePct = limit ? (pending / limit) * 100 : (due > 0 ? (paid / due) * 100 : 0);
+      trackLeftLabel = `${fmtMoney(pending)} usado`;
+      trackRightLabel = limit ? `de ${fmtMoney(limit)} límite` : `de ${fmtMoney(due)} a pagar`;
     }
+    const level = gaugeLevel(gaugePct);
 
     const card = el(`
-      <div class="mini-card" style="background:linear-gradient(150deg, ${m.color} 0%, ${m.color}cc 60%, #0f1b34 140%)">
-        <div class="mini-card-gauge">${gaugeSVG(gaugePct, { size: 'sm' })}</div>
-        <div class="mini-card-name">${escapeHtml(m.name)}</div>
-        <div class="mini-card-amount">${amountLabel}</div>
-        <div class="mini-card-sub">${subLabel}</div>
+      <div class="big-card" style="--bc-color:${m.color}">
+        <div class="big-card-top">
+          <div class="big-card-name"><span class="color-dot" style="background:${m.color}"></span>${escapeHtml(m.name)}</div>
+          <span class="chip status-${level === 'good' ? 'pagado' : level === 'critical' ? 'vencido' : level === 'serious' ? 'parcial' : 'pendiente'}">${Math.round(gaugePct)}%</span>
+        </div>
+        <div class="big-card-value">${amountLabel}</div>
+        <div class="big-card-sub">${subLabel}</div>
+        <div class="big-card-track">
+          <div class="big-card-track-fill level-${level}" style="width:${Math.min(100, gaugePct)}%"></div>
+        </div>
+        <div class="big-card-track-labels">
+          <span>${trackLeftLabel}</span>
+          <span>${trackRightLabel}</span>
+        </div>
       </div>
     `);
     card.addEventListener('click', () => setActiveView('bills'));
@@ -1154,19 +1179,14 @@ function wireExpenseForm() {
    FACTURAS / TARJETAS (VISTA MENSUAL)
    ====================================================================== */
 function wireBillsNav() {
-  document.getElementById('bills-prev-month').addEventListener('click', () => {
-    state.billsMonth = addMonths(state.billsMonth, -1);
-    renderBills();
-  });
-  document.getElementById('bills-next-month').addEventListener('click', () => {
-    state.billsMonth = addMonths(state.billsMonth, 1);
-    renderBills();
-  });
   document.getElementById('btn-add-bill-instance').addEventListener('click', () => openBillInstanceModal());
 }
 
 async function renderBills() {
-  document.getElementById('bills-month-label').textContent = capitalize(monthLabel(state.billsMonth));
+  renderMonthTabs('bills-month-tabs', state.billsMonth, (m) => {
+    state.billsMonth = m;
+    renderBills();
+  });
   const periodISO = state.billsMonth.toISOString().slice(0, 10);
 
   let instances = [];
