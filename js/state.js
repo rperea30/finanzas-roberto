@@ -9,6 +9,7 @@ export const state = {
   expensesCache: [],       // últimos gastos cargados (historial/dashboard)
   billsMonth: startOfMonth(new Date()),
   incomeMonth: startOfMonth(new Date()),
+  detailMonth: startOfMonth(new Date()),
   editingExpenseId: null,
 };
 

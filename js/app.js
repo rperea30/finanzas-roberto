@@ -8,7 +8,7 @@ import { openModal, closeModal } from './modal.js';
 import * as auth from './auth.js';
 import * as data from './data.js';
 
-const charts = { trend: null, donut: null };
+const charts = { trend: null, donut: null, dailyFlow: null };
 
 /* ======================================================================
    INIT
@@ -21,6 +21,7 @@ async function init() {
   wireSettingsButtons();
   wireBillsNav();
   wireIncomeNav();
+  wireDetailNav();
   wireTransferButton();
 
   const session = await auth.getSession();
@@ -247,6 +248,8 @@ async function renderHome() {
   );
 
   renderCategoryDonut(expenses);
+  state.detailMonth = startOfMonth(new Date());
+  await renderExpenseDetailSection();
   await renderHomeCardStrip();
   await renderTransfersList();
 }
@@ -692,7 +695,79 @@ function showDayExpensesModal(dateISO) {
 
 function renderCategoryDonut(expenses) {
   renderCategoryTotalSection(expenses);
-  renderCategoryByMethod(expenses);
+}
+
+function wireDetailNav() {
+  document.getElementById('detail-prev-month').addEventListener('click', () => {
+    state.detailMonth = addMonths(state.detailMonth, -1);
+    renderExpenseDetailSection();
+  });
+  document.getElementById('detail-next-month').addEventListener('click', () => {
+    state.detailMonth = addMonths(state.detailMonth, 1);
+    renderExpenseDetailSection();
+  });
+}
+
+async function renderExpenseDetailSection() {
+  document.getElementById('detail-month-label').textContent = capitalize(monthLabel(state.detailMonth));
+  const from = state.detailMonth.toISOString().slice(0, 10);
+  const to = addMonths(state.detailMonth, 1).toISOString().slice(0, 10);
+
+  let monthExpenses = [];
+  let monthIncome = [];
+  try {
+    [monthExpenses, monthIncome] = await Promise.all([
+      data.fetchExpenses(state.household.id, { from, to }),
+      data.fetchIncomeEntries(state.household.id, { from, to }).catch(() => []),
+    ]);
+  } catch (err) {
+    showToast('Error cargando el detalle: ' + err.message, 'error');
+    return;
+  }
+
+  renderDailyFlowChart(monthExpenses, monthIncome, state.detailMonth);
+  renderCategoryByMethod(monthExpenses);
+}
+
+function renderDailyFlowChart(monthExpenses, monthIncome, monthStart) {
+  const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
+  const gastoByDay = new Array(daysInMonth).fill(0);
+  const ingresoByDay = new Array(daysInMonth).fill(0);
+
+  for (const e of monthExpenses) {
+    const day = Number(e.expense_date.slice(8, 10));
+    if (day >= 1 && day <= daysInMonth) gastoByDay[day - 1] += Number(e.amount);
+  }
+  for (const inc of monthIncome) {
+    const day = Number(inc.entry_date.slice(8, 10));
+    if (day >= 1 && day <= daysInMonth) ingresoByDay[day - 1] += Number(inc.amount);
+  }
+
+  const labels = Array.from({ length: daysInMonth }, (_, i) => String(i + 1));
+  const ctx = document.getElementById('daily-flow-chart');
+  if (charts.dailyFlow) charts.dailyFlow.destroy();
+  charts.dailyFlow = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Ingreso', data: ingresoByDay, backgroundColor: '#0ca30c', borderRadius: 3, barPercentage: 0.7 },
+        { label: 'Gasto', data: gastoByDay, backgroundColor: '#e66767', borderRadius: 3, barPercentage: 0.7 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { color: '#e6ecf5', boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { title: (items) => `Día ${items[0].label}`, label: (item) => `${item.dataset.label}: ${fmtMoney(item.parsed.y)}` } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#93a4c3', font: { size: 9 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#93a4c3', font: { size: 10 }, callback: (v) => '$' + v } },
+      },
+    },
+  });
 }
 
 function renderCategoryByMethod(allExpenses) {
@@ -702,10 +777,14 @@ function renderCategoryByMethod(allExpenses) {
   const usedMethodIds = new Set(allExpenses.map((e) => e.payment_method_id).filter(Boolean));
   const methods = state.paymentMethods.filter((m) => usedMethodIds.has(m.id));
 
+  if (!methods.length) {
+    container.appendChild(el(`<p class="empty-state">Sin gastos en ${monthLabel(state.detailMonth)}.</p>`));
+    return;
+  }
+
   for (const m of methods) {
     const methodExpenses = allExpenses.filter((e) => e.payment_method_id === m.id);
     const methodTotal = methodExpenses.reduce((s, e) => s + Number(e.amount), 0);
-    const groups = groupSum(methodExpenses, (e) => e.categories?.name || 'Sin categoría', (e) => e.categories?.color || '#6b7280', (e) => e.categories?.icon || '💸');
 
     const card = el(`
       <div class="card">
@@ -713,22 +792,9 @@ function renderCategoryByMethod(allExpenses) {
           <h3><span class="color-dot" style="background:${m.color};display:inline-block;margin-right:6px;"></span>${escapeHtml(m.name)}</h3>
           <span class="helper-text">${fmtMoney(methodTotal)}</span>
         </div>
-        <div class="method-cat-bars"></div>
         <div class="method-cat-list"></div>
       </div>
     `);
-
-    const barsEl = card.querySelector('.method-cat-bars');
-    for (const g of groups) {
-      const pct = methodTotal > 0 ? Math.round((g.total / methodTotal) * 100) : 0;
-      barsEl.appendChild(el(`
-        <div class="category-bar-row">
-          <div class="cat-name">${g.icon} ${escapeHtml(g.name)}</div>
-          <div class="category-bar-track"><div class="category-bar-fill" style="width:${pct}%;background:${g.color}"></div></div>
-          <div class="cat-amount">${fmtMoney(g.total)}</div>
-        </div>
-      `));
-    }
 
     const listEl = card.querySelector('.method-cat-list');
     const sorted = [...methodExpenses].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1));
