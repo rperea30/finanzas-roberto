@@ -99,13 +99,26 @@
     </div>
 
     <div class="card">
-      <div class="card-head">
-        <h3>💵 Ingresos del mes</h3>
-        <span class="helper-text" id="income-sources-total"></span>
+      <h3>💰 Disponible sin asignar</h3>
+      <p class="helper-text">Ingresos recibidos (histórico) que aún no has transferido a ningún wallet. No se reinicia cada mes.</p>
+      <div class="unassigned-row">
+        <div class="value" id="unassigned-total">$0.00</div>
+        <button class="btn btn-primary" id="btn-transfer-to-wallet">↳ Transferir a wallet</button>
       </div>
+      <div class="unassigned-breakdown" id="unassigned-breakdown"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>💵 Ingresos por mes</h3>
+        <div>
+          <button class="icon-btn" id="income-prev-month">‹</button>
+          <button class="icon-btn" id="income-next-month">›</button>
+        </div>
+      </div>
+      <div class="helper-text" id="income-month-label" style="margin-bottom:8px;"></div>
       <div id="income-sources-breakdown"></div>
-      <p class="empty-state hidden" id="income-sources-empty">Aún no has registrado ingresos este mes. Ve a Ajustes → Ingresos.</p>
-      <button class="btn btn-secondary" id="btn-transfer-to-wallet" style="margin-top:10px;">↳ Transferir a un wallet</button>
+      <p class="empty-state hidden" id="income-sources-empty">Sin ingresos registrados este mes.</p>
     </div>
 
     <div class="card" id="pace-card">

@@ -20,6 +20,7 @@ async function init() {
   wirePhotoInput();
   wireSettingsButtons();
   wireBillsNav();
+  wireIncomeNav();
   wireTransferButton();
 
   const session = await auth.getSession();
@@ -201,11 +202,15 @@ async function renderHome() {
   let expenses = [];
   let prevExpenses = [];
   let incomeEntries = [];
+  let allIncomeEntries = [];
+  let allTransfers = [];
   try {
-    [expenses, prevExpenses, incomeEntries] = await Promise.all([
+    [expenses, prevExpenses, incomeEntries, allIncomeEntries, allTransfers] = await Promise.all([
       data.fetchExpenses(state.household.id, { from: monthStartISO }),
       data.fetchExpenses(state.household.id, { from: prevMonthStartISO, to: monthStartISO }),
       data.fetchIncomeEntries(state.household.id, { from: monthStartISO }).catch(() => []),
+      data.fetchIncomeEntries(state.household.id).catch(() => []),
+      data.fetchWalletTransfers(state.household.id).catch(() => []),
     ]);
     state.expensesCache = expenses;
   } catch (err) {
@@ -227,7 +232,9 @@ async function renderHome() {
   const receivedIncome = incomeEntries.reduce((s, e) => s + Number(e.amount), 0);
   const targetIncome = state.incomeSources.reduce((s, i) => s + Number(i.monthly_amount), 0);
   const budget = receivedIncome > 0 ? receivedIncome : targetIncome;
-  renderIncomeSourcesCard(incomeEntries, receivedIncome);
+  renderUnassignedCard(allIncomeEntries, allTransfers);
+  state.incomeMonth = startOfMonth(new Date());
+  renderIncomeMonthCard();
   renderHeroTrend(monthTotal, prevMonthTotal, budget, receivedIncome > 0);
   renderPaceCard(monthTotal, avgDaily, budget, now);
   renderTrendChart(expenses, monthStart, now);
@@ -283,15 +290,52 @@ function renderHeroTrend(monthTotal, prevMonthTotal, budget, isReceived) {
   gaugeContainer.innerHTML = gaugeSVG(prevMonthTotal > 0 ? (monthTotal / prevMonthTotal) * 100 : monthTotal > 0 ? 100 : 0, { size: 'md' });
 }
 
-function renderIncomeSourcesCard(incomeEntries, receivedIncome) {
+function renderUnassignedCard(allIncomeEntries, allTransfers) {
+  const totalIncome = allIncomeEntries.reduce((s, e) => s + Number(e.amount), 0);
+  const totalTransferred = allTransfers.reduce((s, t) => s + Number(t.amount), 0);
+  const unassigned = totalIncome - totalTransferred;
+
+  document.getElementById('unassigned-total').textContent = fmtMoney(unassigned);
+
+  const breakdown = document.getElementById('unassigned-breakdown');
+  breakdown.innerHTML = `
+    <div class="ub-row"><span>Ingresos recibidos (histórico)</span><strong>${fmtMoney(totalIncome)}</strong></div>
+    <div class="ub-row"><span>Transferido a wallets (histórico)</span><strong>-${fmtMoney(totalTransferred)}</strong></div>
+  `;
+}
+
+async function renderIncomeMonthCard() {
+  document.getElementById('income-month-label').textContent = capitalize(monthLabel(state.incomeMonth));
+  const from = state.incomeMonth.toISOString().slice(0, 10);
+  const to = addMonths(state.incomeMonth, 1).toISOString().slice(0, 10);
+
+  let entries = [];
+  try {
+    entries = await data.fetchIncomeEntries(state.household.id, { from, to });
+  } catch (err) {
+    showToast('Error cargando ingresos: ' + err.message, 'error');
+    return;
+  }
+
+  const total = entries.reduce((s, e) => s + Number(e.amount), 0);
   const groups = groupSum(
-    incomeEntries,
+    entries,
     (e) => e.income_sources?.name || 'Otro ingreso',
     (e) => e.income_sources?.color || '#22c55e',
     () => '💵'
   );
-  document.getElementById('income-sources-total').textContent = fmtMoney(receivedIncome) + ' recibidos';
-  renderBreakdown('income-sources-breakdown', 'income-sources-empty', groups, receivedIncome);
+  renderBreakdown('income-sources-breakdown', 'income-sources-empty', groups, total);
+}
+
+function wireIncomeNav() {
+  document.getElementById('income-prev-month').addEventListener('click', () => {
+    state.incomeMonth = addMonths(state.incomeMonth, -1);
+    renderIncomeMonthCard();
+  });
+  document.getElementById('income-next-month').addEventListener('click', () => {
+    state.incomeMonth = addMonths(state.incomeMonth, 1);
+    renderIncomeMonthCard();
+  });
 }
 
 function wireTransferButton() {

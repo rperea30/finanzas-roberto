@@ -558,6 +558,33 @@ a { color: var(--accent); }
 .bill-card-gauge-row .gauge-wrap .gauge-center-label { font-size: 10px; }
 .bill-card-gauge-row .bc-note { font-size: 11.5px; color: var(--text-dim); flex: 1; min-width: 0; }
 
+/* ---------- Disponible sin asignar ---------- */
+.unassigned-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.unassigned-row .value { font-size: 30px; font-weight: 800; color: var(--accent); }
+.unassigned-row .btn { width: auto; padding: 11px 16px; flex-shrink: 0; }
+.unassigned-breakdown {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.unassigned-breakdown .ub-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.unassigned-breakdown .ub-row strong { color: var(--text); font-weight: 700; }
+
 /* ---------- Pace card (Ritmo de gasto) ---------- */
 .pace-row {
   display: flex;
