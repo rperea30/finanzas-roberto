@@ -195,7 +195,7 @@ export async function deleteIncomeEntry(id) {
 export async function fetchWalletTransfers(householdId) {
   const { data, error } = await supabase
     .from('wallet_transfers')
-    .select('*')
+    .select('*, income_sources(name, color), payment_methods(name, color, type)')
     .eq('household_id', householdId)
     .order('transfer_date', { ascending: false });
   if (error) throw error;

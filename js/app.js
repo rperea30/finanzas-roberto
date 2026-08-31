@@ -248,6 +248,7 @@ async function renderHome() {
 
   renderCategoryDonut(expenses, monthTotal);
   await renderHomeCardStrip();
+  await renderTransfersList();
 }
 
 function renderHeroTrend(monthTotal, prevMonthTotal, budget, isReceived) {
@@ -435,16 +436,17 @@ function openTransferModal() {
     }
     const destId = overlay.querySelector('#tr-wallet').value;
     const dest = state.paymentMethods.find((m) => m.id === destId);
+    const transferDate = overlay.querySelector('#tr-date').value || todayISO();
     try {
       await data.addWalletTransfer(state.household.id, state.session.user.id, {
         income_source_id: overlay.querySelector('#tr-source').value,
         payment_method_id: destId,
         amount,
-        transfer_date: overlay.querySelector('#tr-date').value || todayISO(),
+        transfer_date: transferDate,
         notes: overlay.querySelector('#tr-notes').value.trim() || null,
       });
       if (dest && (dest.type === 'credit_card' || dest.type === 'debit_card')) {
-        await applyTransferAsCardPayment(dest.id, amount);
+        await applyTransferAsCardPayment(dest.id, amount, transferDate);
       }
       closeModal();
       showToast('Transferencia registrada', 'success');
@@ -455,9 +457,9 @@ function openTransferModal() {
   });
 }
 
-// Cuando transfieres directo a una tarjeta, la registra como abono en el ciclo del mes actual.
-async function applyTransferAsCardPayment(paymentMethodId, amount) {
-  const periodISO = startOfMonth(new Date()).toISOString().slice(0, 10);
+// Cuando transfieres directo a una tarjeta, la registra como abono en el ciclo de ese mes.
+async function applyTransferAsCardPayment(paymentMethodId, amount, transferDate) {
+  const periodISO = startOfMonth(new Date(transferDate + 'T00:00:00')).toISOString().slice(0, 10);
   let instances = [];
   try {
     instances = await data.fetchBillInstances(state.household.id, periodISO);
@@ -477,6 +479,81 @@ async function applyTransferAsCardPayment(paymentMethodId, amount) {
     cycle_label: existing?.cycle_label || null,
     status: dueAmount > 0 && newPaid >= dueAmount ? 'pagado' : dueAmount > 0 ? 'parcial' : 'pagado',
   });
+}
+
+// Revierte el abono aplicado a una tarjeta cuando se borra la transferencia que lo originó.
+async function reverseTransferCardPayment(paymentMethodId, amount, transferDate) {
+  const periodISO = startOfMonth(new Date(transferDate + 'T00:00:00')).toISOString().slice(0, 10);
+  let instances = [];
+  try {
+    instances = await data.fetchBillInstances(state.household.id, periodISO);
+  } catch {
+    return;
+  }
+  const existing = instances.find((b) => b.payment_method_id === paymentMethodId);
+  if (!existing) return;
+  const newPaid = Math.max(0, Number(existing.amount_paid) - amount);
+  const dueAmount = Number(existing.amount_due);
+  await data.upsertBillInstance(state.household.id, {
+    id: existing.id,
+    payment_method_id: paymentMethodId,
+    period_month: periodISO,
+    amount_due: dueAmount,
+    amount_paid: newPaid,
+    due_date: existing.due_date || null,
+    cycle_label: existing.cycle_label || null,
+    status: dueAmount > 0 && newPaid >= dueAmount ? 'pagado' : dueAmount > 0 && newPaid > 0 ? 'parcial' : 'pendiente',
+  });
+}
+
+async function renderTransfersList() {
+  const listEl = document.getElementById('transfers-list');
+  const emptyEl = document.getElementById('transfers-empty');
+  if (!listEl) return;
+  let transfers = [];
+  try {
+    transfers = await data.fetchWalletTransfers(state.household.id);
+  } catch (err) {
+    showToast('Error cargando transferencias: ' + err.message, 'error');
+    return;
+  }
+  listEl.innerHTML = '';
+  if (!transfers.length) {
+    emptyEl.classList.remove('hidden');
+    return;
+  }
+  emptyEl.classList.add('hidden');
+  for (const t of transfers.slice(0, 15)) {
+    const row = el(`
+      <div class="list-row">
+        <div class="row-main">
+          <span class="color-dot" style="background:${t.payment_methods?.color || '#22c55e'}"></span>
+          <div>
+            <div>${escapeHtml(t.income_sources?.name || 'Ingreso')} → ${escapeHtml(t.payment_methods?.name || 'Wallet')}</div>
+            <div class="row-sub">${fmtDate(t.transfer_date)}${t.notes ? ' — ' + escapeHtml(t.notes) : ''}</div>
+          </div>
+        </div>
+        <div class="row-actions" style="display:flex;align-items:center;gap:8px;">
+          <strong>${fmtMoney(t.amount)}</strong>
+          <button data-action="del">🗑️</button>
+        </div>
+      </div>
+    `);
+    row.querySelector('[data-action="del"]').addEventListener('click', async () => {
+      if (!confirm('¿Deshacer esta transferencia? Si fue a una tarjeta, también se revierte el abono.')) return;
+      try {
+        if (t.payment_methods && (t.payment_methods.type === 'credit_card' || t.payment_methods.type === 'debit_card')) {
+          await reverseTransferCardPayment(t.payment_method_id, Number(t.amount), t.transfer_date);
+        }
+        await data.deleteWalletTransfer(t.id);
+        showToast('Transferencia deshecha', 'success');
+        renderHome();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
+    });
+    listEl.appendChild(row);
+  }
 }
 
 function renderPaceCard(monthTotal, avgDaily, budget, now) {
