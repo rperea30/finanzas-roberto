@@ -658,9 +658,27 @@ a { color: var(--accent); }
   max-width: 560px;
   max-height: 86vh;
   overflow-y: auto;
+  position: relative;
 }
 
-.modal-box h3 { margin-top: 0; }
+.modal-box h3 { margin-top: 0; padding-right: 34px; }
+
+.modal-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
 
 .modal-actions {
   display: flex;

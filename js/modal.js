@@ -4,10 +4,11 @@ export function openModal(innerHTML) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'active-modal-overlay';
-  overlay.innerHTML = `<div class="modal-box">${innerHTML}</div>`;
+  overlay.innerHTML = `<div class="modal-box"><button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>${innerHTML}</div>`;
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) closeModal();
   });
+  overlay.querySelector('.modal-close-btn').addEventListener('click', () => closeModal());
   root.appendChild(overlay);
   return overlay;
 }

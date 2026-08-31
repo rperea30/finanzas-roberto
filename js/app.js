@@ -690,58 +690,76 @@ function showDayExpensesModal(dateISO) {
   });
 }
 
-let categoryFilterMethodId = null;
-
 function renderCategoryDonut(expenses) {
-  categoryFilterMethodId = null;
-  renderCategoryMethodFilter(expenses);
-  renderCategorySection(expenses);
+  renderCategoryTotalSection(expenses);
+  renderCategoryByMethod(expenses);
 }
 
-function renderCategoryMethodFilter(allExpenses) {
-  const filterRow = document.getElementById('category-method-filter');
-  filterRow.innerHTML = '';
+function renderCategoryByMethod(allExpenses) {
+  const container = document.getElementById('category-by-method');
+  container.innerHTML = '';
 
   const usedMethodIds = new Set(allExpenses.map((e) => e.payment_method_id).filter(Boolean));
   const methods = state.paymentMethods.filter((m) => usedMethodIds.has(m.id));
-  if (methods.length < 2) {
-    filterRow.classList.add('hidden');
-    return;
-  }
-  filterRow.classList.remove('hidden');
-
-  const allPill = el(`<div class="pill selected" data-id="">Todos</div>`);
-  allPill.addEventListener('click', () => selectCategoryFilter(null, allExpenses));
-  filterRow.appendChild(allPill);
 
   for (const m of methods) {
-    const pill = el(`<div class="pill" data-id="${m.id}">${escapeHtml(m.name)}</div>`);
-    pill.addEventListener('click', () => selectCategoryFilter(m.id, allExpenses));
-    filterRow.appendChild(pill);
+    const methodExpenses = allExpenses.filter((e) => e.payment_method_id === m.id);
+    const methodTotal = methodExpenses.reduce((s, e) => s + Number(e.amount), 0);
+    const groups = groupSum(methodExpenses, (e) => e.categories?.name || 'Sin categoría', (e) => e.categories?.color || '#6b7280', (e) => e.categories?.icon || '💸');
+
+    const card = el(`
+      <div class="card">
+        <div class="card-head">
+          <h3><span class="color-dot" style="background:${m.color};display:inline-block;margin-right:6px;"></span>${escapeHtml(m.name)}</h3>
+          <span class="helper-text">${fmtMoney(methodTotal)}</span>
+        </div>
+        <div class="method-cat-bars"></div>
+        <div class="method-cat-list"></div>
+      </div>
+    `);
+
+    const barsEl = card.querySelector('.method-cat-bars');
+    for (const g of groups) {
+      const pct = methodTotal > 0 ? Math.round((g.total / methodTotal) * 100) : 0;
+      barsEl.appendChild(el(`
+        <div class="category-bar-row">
+          <div class="cat-name">${g.icon} ${escapeHtml(g.name)}</div>
+          <div class="category-bar-track"><div class="category-bar-fill" style="width:${pct}%;background:${g.color}"></div></div>
+          <div class="cat-amount">${fmtMoney(g.total)}</div>
+        </div>
+      `));
+    }
+
+    const listEl = card.querySelector('.method-cat-list');
+    const sorted = [...methodExpenses].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1));
+    for (const exp of sorted) {
+      const row = el(`
+        <div class="list-row" style="cursor:pointer;">
+          <div class="row-main">
+            <span class="color-dot" style="background:${exp.categories?.color || '#6b7280'}"></span>
+            <div>
+              <div>${exp.categories?.icon || '💸'} ${escapeHtml(exp.merchant || exp.categories?.name || 'Gasto')}</div>
+              <div class="row-sub">${fmtDate(exp.expense_date)}</div>
+            </div>
+          </div>
+          <strong>${fmtMoney(exp.amount)}</strong>
+        </div>
+      `);
+      row.addEventListener('click', () => openExpenseDetail(exp));
+      listEl.appendChild(row);
+    }
+
+    container.appendChild(card);
   }
 }
 
-function selectCategoryFilter(methodId, allExpenses) {
-  categoryFilterMethodId = methodId;
-  document.querySelectorAll('#category-method-filter .pill').forEach((p) => {
-    p.classList.toggle('selected', (p.dataset.id || null) === methodId);
-  });
-  renderCategorySection(allExpenses);
-}
-
-function renderCategorySection(allExpenses) {
-  const expenses = categoryFilterMethodId
-    ? allExpenses.filter((e) => e.payment_method_id === categoryFilterMethodId)
-    : allExpenses;
+function renderCategoryTotalSection(expenses) {
   const filteredTotal = expenses.reduce((s, e) => s + Number(e.amount), 0);
-
   const groups = groupSum(expenses, (e) => e.categories?.name || 'Sin categoría', () => null, (e) => e.categories?.icon || '💸');
   const emptyEl = document.getElementById('category-empty');
   const rowEl = document.getElementById('category-donut-row');
   const legend = document.getElementById('category-legend');
-  const detailList = document.getElementById('category-expense-list');
   legend.innerHTML = '';
-  detailList.innerHTML = '';
 
   const ctx = document.getElementById('category-donut');
   if (charts.donut) { charts.donut.destroy(); charts.donut = null; }
@@ -789,23 +807,6 @@ function renderCategorySection(allExpenses) {
     `));
   }
 
-  const sorted = [...expenses].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1));
-  for (const exp of sorted) {
-    const row = el(`
-      <div class="list-row" style="cursor:pointer;">
-        <div class="row-main">
-          <span class="color-dot" style="background:${exp.categories?.color || '#6b7280'}"></span>
-          <div>
-            <div>${exp.categories?.icon || '💸'} ${escapeHtml(exp.merchant || exp.categories?.name || 'Gasto')}</div>
-            <div class="row-sub">${fmtDate(exp.expense_date)}${exp.payment_methods ? ' · ' + escapeHtml(exp.payment_methods.name) : ' · sin método'}</div>
-          </div>
-        </div>
-        <strong>${fmtMoney(exp.amount)}</strong>
-      </div>
-    `);
-    row.addEventListener('click', () => openExpenseDetail(exp));
-    detailList.appendChild(row);
-  }
 }
 
 async function renderHomeCardStrip() {
