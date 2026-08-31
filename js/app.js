@@ -341,6 +341,36 @@ async function renderIncomeMonthCard() {
     () => '💵'
   );
   renderBreakdown('income-sources-breakdown', 'income-sources-empty', groups, total);
+
+  const titleEl = document.getElementById('income-entries-title');
+  const listEl = document.getElementById('income-entries-list');
+  listEl.innerHTML = '';
+  titleEl.textContent = entries.length ? 'Movimientos' : '';
+
+  const sorted = [...entries].sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1));
+  for (const e of sorted) {
+    const row = el(`
+      <div class="list-row">
+        <div class="row-main">
+          <span class="color-dot" style="background:${e.income_sources?.color || '#22c55e'}"></span>
+          <div>
+            <div>${escapeHtml(e.income_sources?.name || 'Otro ingreso')}${e.notes ? ' — ' + escapeHtml(e.notes) : ''}</div>
+            <div class="row-sub">${fmtDateLong(e.entry_date)}</div>
+          </div>
+        </div>
+        <div class="row-actions" style="display:flex;align-items:center;gap:8px;">
+          <strong>${fmtMoney(e.amount)}</strong>
+          <button data-action="del">🗑️</button>
+        </div>
+      </div>
+    `);
+    row.querySelector('[data-action="del"]').addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este ingreso?')) return;
+      await data.deleteIncomeEntry(e.id);
+      renderIncomeMonthCard();
+    });
+    listEl.appendChild(row);
+  }
 }
 
 function wireIncomeNav() {
