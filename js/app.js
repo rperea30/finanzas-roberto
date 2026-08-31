@@ -300,8 +300,24 @@ function renderUnassignedCard(allIncomeEntries, allTransfers) {
   const breakdown = document.getElementById('unassigned-breakdown');
   breakdown.innerHTML = `
     <div class="ub-row"><span>Ingresos recibidos (histórico)</span><strong>${fmtMoney(totalIncome)}</strong></div>
-    <div class="ub-row"><span>Transferido a wallets (histórico)</span><strong>-${fmtMoney(totalTransferred)}</strong></div>
+    <div class="ub-row"><span>Transferido (histórico)</span><strong>-${fmtMoney(totalTransferred)}</strong></div>
   `;
+
+  if (state.incomeSources.length) {
+    const perSource = document.createElement('div');
+    perSource.style.marginTop = '10px';
+    perSource.style.paddingTop = '10px';
+    perSource.style.borderTop = '1px solid var(--border)';
+    for (const src of state.incomeSources) {
+      const received = allIncomeEntries.filter((e) => e.income_source_id === src.id).reduce((s, e) => s + Number(e.amount), 0);
+      const transferred = allTransfers.filter((t) => t.income_source_id === src.id).reduce((s, t) => s + Number(t.amount), 0);
+      const left = received - transferred;
+      perSource.appendChild(
+        el(`<div class="ub-row"><span>${escapeHtml(src.name)} sin asignar</span><strong>${fmtMoney(left)}</strong></div>`)
+      );
+    }
+    breakdown.appendChild(perSource);
+  }
 }
 
 async function renderIncomeMonthCard() {
@@ -343,18 +359,28 @@ function wireTransferButton() {
 }
 
 function openTransferModal() {
-  const wallets = state.paymentMethods.filter((m) => m.type === 'cash' || m.type === 'wallet');
-  if (!wallets.length) {
-    showToast('Primero agrega un wallet (ej. Yappy/Efectivo) en Ajustes.', 'error');
+  if (!state.incomeSources.length) {
+    showToast('Primero agrega un ingreso (ej. Salario) en Ajustes.', 'error');
     return;
   }
-  const options = wallets.map((w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
+  if (!state.paymentMethods.length) {
+    showToast('Primero agrega una tarjeta o wallet en Ajustes.', 'error');
+    return;
+  }
+  const sourceOptions = state.incomeSources.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  const destOptions = state.paymentMethods
+    .map((m) => `<option value="${m.id}">${escapeHtml(m.name)} (${labelType(m.type)})</option>`)
+    .join('');
   const overlay = openModal(`
-    <h3>Transferir a un wallet</h3>
-    <p class="helper-text">Mueve dinero de tus ingresos hacia un wallet para gastarlo (efectivo, tarjeta prepago, etc.)</p>
+    <h3>Transferir ingreso</h3>
+    <p class="helper-text">Mueve dinero de un ingreso hacia un wallet (para gastar) o directo a pagar una tarjeta.</p>
     <div class="field">
-      <label>Wallet destino</label>
-      <select id="tr-wallet">${options}</select>
+      <label>Desde (ingreso)</label>
+      <select id="tr-source">${sourceOptions}</select>
+    </div>
+    <div class="field">
+      <label>Hacia</label>
+      <select id="tr-wallet">${destOptions}</select>
     </div>
     <div class="field">
       <label>Monto</label>
@@ -366,7 +392,7 @@ function openTransferModal() {
     </div>
     <div class="field">
       <label>Notas (opcional)</label>
-      <input type="text" id="tr-notes" placeholder="Ej. de mi salario de agosto" />
+      <input type="text" id="tr-notes" placeholder="Ej. abono a la tarjeta de agosto" />
     </div>
     <p class="error-text" id="tr-error"></p>
     <button class="btn btn-primary" id="tr-save">Transferir</button>
@@ -377,19 +403,49 @@ function openTransferModal() {
       overlay.querySelector('#tr-error').textContent = 'Ingresa un monto válido.';
       return;
     }
+    const destId = overlay.querySelector('#tr-wallet').value;
+    const dest = state.paymentMethods.find((m) => m.id === destId);
     try {
       await data.addWalletTransfer(state.household.id, state.session.user.id, {
-        payment_method_id: overlay.querySelector('#tr-wallet').value,
+        income_source_id: overlay.querySelector('#tr-source').value,
+        payment_method_id: destId,
         amount,
         transfer_date: overlay.querySelector('#tr-date').value || todayISO(),
         notes: overlay.querySelector('#tr-notes').value.trim() || null,
       });
+      if (dest && (dest.type === 'credit_card' || dest.type === 'debit_card')) {
+        await applyTransferAsCardPayment(dest.id, amount);
+      }
       closeModal();
       showToast('Transferencia registrada', 'success');
       renderHome();
     } catch (err) {
       overlay.querySelector('#tr-error').textContent = err.message;
     }
+  });
+}
+
+// Cuando transfieres directo a una tarjeta, la registra como abono en el ciclo del mes actual.
+async function applyTransferAsCardPayment(paymentMethodId, amount) {
+  const periodISO = startOfMonth(new Date()).toISOString().slice(0, 10);
+  let instances = [];
+  try {
+    instances = await data.fetchBillInstances(state.household.id, periodISO);
+  } catch {
+    return;
+  }
+  const existing = instances.find((b) => b.payment_method_id === paymentMethodId);
+  const newPaid = (existing ? Number(existing.amount_paid) : 0) + amount;
+  const dueAmount = existing ? Number(existing.amount_due) : 0;
+  await data.upsertBillInstance(state.household.id, {
+    id: existing?.id,
+    payment_method_id: paymentMethodId,
+    period_month: periodISO,
+    amount_due: dueAmount,
+    amount_paid: newPaid,
+    due_date: existing?.due_date || null,
+    cycle_label: existing?.cycle_label || null,
+    status: dueAmount > 0 && newPaid >= dueAmount ? 'pagado' : dueAmount > 0 ? 'parcial' : 'pagado',
   });
 }
 
