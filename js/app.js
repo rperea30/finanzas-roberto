@@ -20,6 +20,7 @@ async function init() {
   wirePhotoInput();
   wireSettingsButtons();
   wireBillsNav();
+  wireTransferButton();
 
   const session = await auth.getSession();
   if (session) {
@@ -226,6 +227,7 @@ async function renderHome() {
   const receivedIncome = incomeEntries.reduce((s, e) => s + Number(e.amount), 0);
   const targetIncome = state.incomeSources.reduce((s, i) => s + Number(i.monthly_amount), 0);
   const budget = receivedIncome > 0 ? receivedIncome : targetIncome;
+  renderIncomeSourcesCard(incomeEntries, receivedIncome);
   renderHeroTrend(monthTotal, prevMonthTotal, budget, receivedIncome > 0);
   renderPaceCard(monthTotal, avgDaily, budget, now);
   renderTrendChart(expenses, monthStart, now);
@@ -279,6 +281,72 @@ function renderHeroTrend(monthTotal, prevMonthTotal, budget, isReceived) {
   leftLabel.textContent = fmtMoney(monthTotal) + ' gastado';
   rightLabel.textContent = prevMonthTotal ? 'vs ' + fmtMoney(prevMonthTotal) + ' mes pasado' : 'primer mes de registro';
   gaugeContainer.innerHTML = gaugeSVG(prevMonthTotal > 0 ? (monthTotal / prevMonthTotal) * 100 : monthTotal > 0 ? 100 : 0, { size: 'md' });
+}
+
+function renderIncomeSourcesCard(incomeEntries, receivedIncome) {
+  const groups = groupSum(
+    incomeEntries,
+    (e) => e.income_sources?.name || 'Otro ingreso',
+    (e) => e.income_sources?.color || '#22c55e',
+    () => '💵'
+  );
+  document.getElementById('income-sources-total').textContent = fmtMoney(receivedIncome) + ' recibidos';
+  renderBreakdown('income-sources-breakdown', 'income-sources-empty', groups, receivedIncome);
+}
+
+function wireTransferButton() {
+  document.getElementById('btn-transfer-to-wallet').addEventListener('click', () => openTransferModal());
+}
+
+function openTransferModal() {
+  const wallets = state.paymentMethods.filter((m) => m.type === 'cash' || m.type === 'wallet');
+  if (!wallets.length) {
+    showToast('Primero agrega un wallet (ej. Yappy/Efectivo) en Ajustes.', 'error');
+    return;
+  }
+  const options = wallets.map((w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
+  const overlay = openModal(`
+    <h3>Transferir a un wallet</h3>
+    <p class="helper-text">Mueve dinero de tus ingresos hacia un wallet para gastarlo (efectivo, tarjeta prepago, etc.)</p>
+    <div class="field">
+      <label>Wallet destino</label>
+      <select id="tr-wallet">${options}</select>
+    </div>
+    <div class="field">
+      <label>Monto</label>
+      <input type="number" step="0.01" min="0.01" id="tr-amount" class="amount-input" placeholder="0.00" />
+    </div>
+    <div class="field">
+      <label>Fecha</label>
+      <input type="date" id="tr-date" value="${todayISO()}" />
+    </div>
+    <div class="field">
+      <label>Notas (opcional)</label>
+      <input type="text" id="tr-notes" placeholder="Ej. de mi salario de agosto" />
+    </div>
+    <p class="error-text" id="tr-error"></p>
+    <button class="btn btn-primary" id="tr-save">Transferir</button>
+  `);
+  overlay.querySelector('#tr-save').addEventListener('click', async () => {
+    const amount = parseFloat(overlay.querySelector('#tr-amount').value);
+    if (!amount || amount <= 0) {
+      overlay.querySelector('#tr-error').textContent = 'Ingresa un monto válido.';
+      return;
+    }
+    try {
+      await data.addWalletTransfer(state.household.id, state.session.user.id, {
+        payment_method_id: overlay.querySelector('#tr-wallet').value,
+        amount,
+        transfer_date: overlay.querySelector('#tr-date').value || todayISO(),
+        notes: overlay.querySelector('#tr-notes').value.trim() || null,
+      });
+      closeModal();
+      showToast('Transferencia registrada', 'success');
+      renderHome();
+    } catch (err) {
+      overlay.querySelector('#tr-error').textContent = err.message;
+    }
+  });
 }
 
 function renderPaceCard(monthTotal, avgDaily, budget, now) {
@@ -435,8 +503,14 @@ async function renderHomeCardStrip() {
 
   const periodISO = startOfMonth(new Date()).toISOString().slice(0, 10);
   let instances = [];
+  let allExpenses = [];
+  let allTransfers = [];
   try {
-    instances = await data.fetchBillInstances(state.household.id, periodISO);
+    [instances, allExpenses, allTransfers] = await Promise.all([
+      data.fetchBillInstances(state.household.id, periodISO).catch(() => []),
+      data.fetchAllExpensesRaw(state.household.id).catch(() => []),
+      data.fetchWalletTransfers(state.household.id).catch(() => []),
+    ]);
   } catch {
     instances = [];
   }
@@ -450,15 +524,15 @@ async function renderHomeCardStrip() {
     const startingBalance = m.starting_balance != null ? Number(m.starting_balance) : null;
 
     let amountLabel, subLabel, gaugePct;
-    if (isCashLike && startingBalance != null) {
-      const available = Math.max(0, startingBalance - paid);
+    if (isCashLike) {
+      const base = startingBalance || 0;
+      const transferredIn = allTransfers.filter((t) => t.payment_method_id === m.id).reduce((s, t) => s + Number(t.amount), 0);
+      const spent = allExpenses.filter((e) => e.payment_method_id === m.id).reduce((s, e) => s + Number(e.amount), 0);
+      const funded = base + transferredIn;
+      const available = Math.max(0, funded - spent);
       amountLabel = fmtMoney(available);
-      subLabel = `disponible de ${fmtMoney(startingBalance)}`;
-      gaugePct = startingBalance > 0 ? (paid / startingBalance) * 100 : 0;
-    } else if (isCashLike) {
-      amountLabel = fmtMoney(paid);
-      subLabel = 'gastado este mes';
-      gaugePct = due > 0 ? (paid / due) * 100 : 0;
+      subLabel = funded > 0 ? `disponible de ${fmtMoney(funded)}` : `${fmtMoney(spent)} gastado`;
+      gaugePct = funded > 0 ? (spent / funded) * 100 : 0;
     } else {
       amountLabel = fmtMoney(pending);
       subLabel = 'saldo pendiente';

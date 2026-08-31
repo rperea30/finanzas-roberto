@@ -191,6 +191,42 @@ export async function deleteIncomeEntry(id) {
   if (error) throw error;
 }
 
+/* ---------------- Transferencias de ingresos a wallets ---------------- */
+export async function fetchWalletTransfers(householdId) {
+  const { data, error } = await supabase
+    .from('wallet_transfers')
+    .select('*')
+    .eq('household_id', householdId)
+    .order('transfer_date', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function addWalletTransfer(householdId, userId, payload) {
+  const { data, error } = await supabase
+    .from('wallet_transfers')
+    .insert({ household_id: householdId, created_by: userId, ...payload })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteWalletTransfer(id) {
+  const { error } = await supabase.from('wallet_transfers').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* ---------------- Todos los gastos (sin filtro de fecha, para saldos) ---------------- */
+export async function fetchAllExpensesRaw(householdId) {
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('amount, payment_method_id')
+    .eq('household_id', householdId);
+  if (error) throw error;
+  return data;
+}
+
 /* ---------------- Facturas recurrentes ---------------- */
 export async function fetchRecurringBills(householdId) {
   const { data, error } = await supabase
