@@ -221,7 +221,7 @@ export async function deleteWalletTransfer(id) {
 export async function fetchAllExpensesRaw(householdId) {
   const { data, error } = await supabase
     .from('expenses')
-    .select('amount, payment_method_id')
+    .select('amount, payment_method_id, expense_date')
     .eq('household_id', householdId);
   if (error) throw error;
   return data;

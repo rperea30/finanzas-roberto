@@ -469,6 +469,39 @@ a { color: var(--accent); }
   margin-top: 6px;
 }
 
+/* ---------- Tabla estilo Excel (Resumen del mes / Ciclo vigente) ---------- */
+.excel-table-wrap {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+.excel-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 560px;
+  font-size: 13px;
+}
+.excel-table th {
+  background: #16305c;
+  color: #dbe8ff;
+  text-align: left;
+  padding: 9px 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+.excel-table td {
+  padding: 9px 10px;
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+}
+.excel-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+.excel-table td .color-dot { display: inline-block; margin-right: 6px; vertical-align: middle; }
+.excel-table td.neg { color: var(--status-critical); font-weight: 700; }
+
 /* ---------- Month tabs (como las pestañas del Excel) ---------- */
 .month-tabs {
   display: flex;

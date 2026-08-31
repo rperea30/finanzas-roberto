@@ -830,6 +830,42 @@ function renderCategoryByMethod(allExpenses) {
   }
 }
 
+// Ciclo de facturación vigente para un método de pago (como "CICLO VIGENTE" del Excel).
+// Tarjetas: día siguiente al corte -> día de corte del mes siguiente. Efectivo/wallet: mes calendario.
+function getCycleRange(method, today) {
+  const closeDay = method.cycle_close_day;
+  if (!closeDay || method.type === 'cash' || method.type === 'wallet') {
+    const start = startOfMonth(today);
+    const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return { start, end };
+  }
+  const day = today.getDate();
+  let start, end;
+  if (day > closeDay) {
+    start = new Date(today.getFullYear(), today.getMonth(), closeDay + 1);
+    end = new Date(today.getFullYear(), today.getMonth() + 1, closeDay);
+  } else {
+    start = new Date(today.getFullYear(), today.getMonth() - 1, closeDay + 1);
+    end = new Date(today.getFullYear(), today.getMonth(), closeDay);
+  }
+  return { start, end };
+}
+
+function sumExpensesInRange(expenses, methodId, start, end) {
+  const startISO = start.toISOString().slice(0, 10);
+  const endISO = end.toISOString().slice(0, 10);
+  return expenses
+    .filter((e) => e.payment_method_id === methodId && e.expense_date >= startISO && e.expense_date <= endISO)
+    .reduce((s, e) => s + Number(e.amount), 0);
+}
+
+function estadoChip(pct) {
+  if (pct >= 100) return { text: 'Excedido', cls: 'vencido' };
+  if (pct >= 90) return { text: 'Cerca del límite', cls: 'parcial' };
+  if (pct >= 70) return { text: 'Atento', cls: 'pendiente' };
+  return { text: 'OK', cls: 'pagado' };
+}
+
 async function renderHomeCardStrip() {
   const strip = document.getElementById('home-card-strip');
   const emptyEl = document.getElementById('home-card-strip-empty');
@@ -841,70 +877,82 @@ async function renderHomeCardStrip() {
   }
   emptyEl.classList.add('hidden');
 
-  const periodISO = startOfMonth(new Date()).toISOString().slice(0, 10);
-  let instances = [];
   let allExpenses = [];
-  let allTransfers = [];
   try {
-    [instances, allExpenses, allTransfers] = await Promise.all([
-      data.fetchBillInstances(state.household.id, periodISO).catch(() => []),
-      data.fetchAllExpensesRaw(state.household.id).catch(() => []),
-      data.fetchWalletTransfers(state.household.id).catch(() => []),
-    ]);
+    allExpenses = await data.fetchAllExpensesRaw(state.household.id);
   } catch {
-    instances = [];
+    allExpenses = [];
   }
 
-  for (const m of state.paymentMethods) {
-    const inst = instances.find((b) => b.payment_method_id === m.id);
-    const due = inst ? Number(inst.amount_due) : 0;
-    const paid = inst ? Number(inst.amount_paid) : 0;
-    const pending = Math.max(0, due - paid);
-    const isCashLike = m.type === 'cash' || m.type === 'wallet';
-    const startingBalance = m.starting_balance != null ? Number(m.starting_balance) : null;
+  const today = new Date();
+  const monthStart = startOfMonth(today);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
-    let amountLabel, subLabel, gaugePct, trackLeftLabel, trackRightLabel;
-    if (isCashLike) {
-      const base = startingBalance || 0;
-      const transferredIn = allTransfers.filter((t) => t.payment_method_id === m.id).reduce((s, t) => s + Number(t.amount), 0);
-      const spent = allExpenses.filter((e) => e.payment_method_id === m.id).reduce((s, e) => s + Number(e.amount), 0);
-      const funded = base + transferredIn;
-      const available = Math.max(0, funded - spent);
-      amountLabel = fmtMoney(available);
-      subLabel = funded > 0 ? 'disponible' : 'sin fondos asignados';
-      gaugePct = funded > 0 ? (spent / funded) * 100 : 0;
-      trackLeftLabel = `${fmtMoney(spent)} gastado`;
-      trackRightLabel = `de ${fmtMoney(funded)}`;
-    } else {
-      amountLabel = fmtMoney(pending);
-      subLabel = 'saldo pendiente';
-      const limit = m.credit_limit ? Number(m.credit_limit) : null;
-      gaugePct = limit ? (pending / limit) * 100 : (due > 0 ? (paid / due) * 100 : 0);
-      trackLeftLabel = `${fmtMoney(pending)} usado`;
-      trackRightLabel = limit ? `de ${fmtMoney(limit)} límite` : `de ${fmtMoney(due)} a pagar`;
-    }
-    const level = gaugeLevel(gaugePct);
+  const rows = state.paymentMethods.map((m) => {
+    const limit = m.credit_limit != null ? Number(m.credit_limit) : m.starting_balance != null ? Number(m.starting_balance) : 0;
+    const monthSpent = sumExpensesInRange(allExpenses, m.id, monthStart, monthEnd);
+    const cycle = getCycleRange(m, today);
+    const cycleSpent = sumExpensesInRange(allExpenses, m.id, cycle.start, cycle.end);
+    return { m, limit, monthSpent, cycle, cycleSpent };
+  });
 
-    const card = el(`
-      <div class="big-card" style="--bc-color:${m.color}">
-        <div class="big-card-top">
-          <div class="big-card-name"><span class="color-dot" style="background:${m.color}"></span>${escapeHtml(m.name)}</div>
-          <span class="chip status-${level === 'good' ? 'pagado' : level === 'critical' ? 'vencido' : level === 'serious' ? 'parcial' : 'pendiente'}">${Math.round(gaugePct)}%</span>
-        </div>
-        <div class="big-card-value">${amountLabel}</div>
-        <div class="big-card-sub">${subLabel}</div>
-        <div class="big-card-track">
-          <div class="big-card-track-fill level-${level}" style="width:${Math.min(100, gaugePct)}%"></div>
-        </div>
-        <div class="big-card-track-labels">
-          <span>${trackLeftLabel}</span>
-          <span>${trackRightLabel}</span>
-        </div>
-      </div>
-    `);
-    card.addEventListener('click', () => setActiveView('bills'));
-    strip.appendChild(card);
+  // ---- Tabla 1: Resumen del mes por wallet ----
+  const monthTable = el(`
+    <div class="excel-table-wrap">
+      <table class="excel-table">
+        <thead><tr><th>Wallet</th><th>Límite</th><th>Gastado en el mes</th><th>Disponible</th><th>% usado</th><th>Estado</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  `);
+  const monthBody = monthTable.querySelector('tbody');
+  for (const r of rows) {
+    const pct = r.limit > 0 ? (r.monthSpent / r.limit) * 100 : 0;
+    const available = r.limit - r.monthSpent;
+    const est = estadoChip(pct);
+    monthBody.appendChild(el(`
+      <tr>
+        <td><span class="color-dot" style="background:${r.m.color}"></span>${escapeHtml(r.m.name)}</td>
+        <td>${fmtMoney(r.limit)}</td>
+        <td>${fmtMoney(r.monthSpent)}</td>
+        <td class="${available < 0 ? 'neg' : ''}">${fmtMoney(available)}</td>
+        <td>${Math.round(pct)}%</td>
+        <td><span class="chip status-${est.cls}">${est.text}</span></td>
+      </tr>
+    `));
   }
+
+  // ---- Tabla 2: Ciclo vigente ----
+  const cycleTable = el(`
+    <div class="excel-table-wrap">
+      <table class="excel-table">
+        <thead><tr><th>Wallet</th><th>Inicio de ciclo</th><th>Fin de ciclo</th><th>Gastado en el ciclo</th><th>Límite</th><th>Disponible</th><th>Estado</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  `);
+  const cycleBody = cycleTable.querySelector('tbody');
+  for (const r of rows) {
+    const pct = r.limit > 0 ? (r.cycleSpent / r.limit) * 100 : 0;
+    const available = r.limit - r.cycleSpent;
+    const est = estadoChip(pct);
+    cycleBody.appendChild(el(`
+      <tr>
+        <td><span class="color-dot" style="background:${r.m.color}"></span>${escapeHtml(r.m.name)}</td>
+        <td>${fmtDate(r.cycle.start.toISOString().slice(0, 10))}</td>
+        <td>${fmtDate(r.cycle.end.toISOString().slice(0, 10))}</td>
+        <td>${fmtMoney(r.cycleSpent)}</td>
+        <td>${fmtMoney(r.limit)}</td>
+        <td class="${available < 0 ? 'neg' : ''}">${fmtMoney(available)}</td>
+        <td><span class="chip status-${est.cls}">${est.text}</span></td>
+      </tr>
+    `));
+  }
+
+  strip.appendChild(el(`<div class="section-title" style="margin-left:0;">Resumen del mes por wallet</div>`));
+  strip.appendChild(monthTable);
+  strip.appendChild(el(`<div class="section-title" style="margin-left:0;">Ciclo vigente</div>`));
+  strip.appendChild(cycleTable);
 }
 
 function groupSum(expenses, keyFn, colorFn, iconFn) {
