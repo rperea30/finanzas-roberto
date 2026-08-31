@@ -69,104 +69,37 @@
   <!-- ---------- HOME / DASHBOARD ---------- -->
   <section id="view-home" class="view">
 
-    <div class="hero-card" id="hero-budget-card">
-      <div class="hero-top">
-        <div>
-          <div class="hero-label">Gastado este mes</div>
-          <div class="hero-value" id="stat-month-total">$0.00</div>
-          <div class="hero-sub" id="hero-budget-sub">— vs. mes anterior</div>
-        </div>
-        <div id="hero-gauge"></div>
-      </div>
-      <div class="hero-track">
-        <div class="hero-track-fill" id="hero-track-fill" style="width:0%"></div>
-      </div>
-      <div class="hero-track-labels">
-        <span id="hero-track-label-left">$0 gastado</span>
-        <span id="hero-track-label-right">de presupuesto</span>
-      </div>
-    </div>
+    <div class="month-tabs" id="home-month-tabs"></div>
 
-    <div class="stat-grid">
-      <div class="stat-box">
-        <div class="label">Gastado hoy</div>
-        <div class="value" id="stat-today-total">$0.00</div>
-      </div>
-      <div class="stat-box">
-        <div class="label">Promedio diario</div>
-        <div class="value" id="stat-avg-daily">$0.00</div>
-      </div>
+    <div class="card">
+      <h3>Resumen del mes por wallet</h3>
+      <div id="month-summary-table"></div>
     </div>
 
     <div class="card">
-      <h3>💰 Disponible sin asignar</h3>
-      <p class="helper-text">Ingresos recibidos (histórico) que aún no has transferido a ningún wallet. No se reinicia cada mes.</p>
-      <div class="unassigned-row">
-        <div class="value" id="unassigned-total">$0.00</div>
-        <button class="btn btn-primary" id="btn-transfer-to-wallet">↳ Transferir a wallet</button>
-      </div>
-      <div class="unassigned-breakdown" id="unassigned-breakdown"></div>
+      <h3>Ciclo vigente</h3>
+      <div id="cycle-table"></div>
     </div>
 
     <div class="card">
-      <h3>↳ Transferencias recientes</h3>
+      <h3>💵 Ingresos del mes</h3>
+      <div id="income-table"></div>
+      <button class="btn btn-secondary" id="btn-transfer-to-wallet" style="margin-top:10px;">↳ Transferir a wallet</button>
+      <div class="section-title" id="transfers-title" style="margin-left:0;">Transferencias</div>
       <div id="transfers-list"></div>
       <p class="empty-state hidden" id="transfers-empty">Aún no has hecho transferencias.</p>
     </div>
 
     <div class="card">
-      <h3>💵 Ingresos por mes</h3>
-      <div class="month-tabs" id="income-month-tabs"></div>
-      <div id="income-sources-breakdown"></div>
-      <p class="empty-state hidden" id="income-sources-empty">Sin ingresos registrados este mes.</p>
-      <div class="section-title" id="income-entries-title" style="margin-left:0;"></div>
-      <div id="income-entries-list"></div>
-    </div>
-
-    <div class="card" id="pace-card">
-      <h3>⚡ Ritmo de gasto</h3>
-      <div class="pace-row">
-        <div class="pace-stat">
-          <div class="label">Puedes gastar hoy hasta</div>
-          <div class="value" id="pace-safe-daily">$0.00</div>
-          <div class="helper-text" id="pace-days-left"></div>
-        </div>
-        <div class="pace-stat pace-stat-right">
-          <div class="label">Si sigues así, terminarás el mes con</div>
-          <div class="value" id="pace-projection">$0.00</div>
-          <div class="helper-text" id="pace-projection-note"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <h3>Tendencia del mes</h3>
-        <span class="helper-text" id="trend-days-label"></span>
-      </div>
-      <div class="chart-box chart-box-line"><canvas id="trend-chart"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h3>Mis tarjetas</h3>
-      <p class="helper-text" style="margin-top:-2px;margin-bottom:10px;">Límite del ciclo actual — esto es lo que deberías revisar día a día.</p>
-      <div id="home-card-strip" class="big-card-list"></div>
-      <p class="empty-state hidden" id="home-card-strip-empty">Agrega tarjetas en Ajustes para verlas aquí.</p>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0;">💳 Gasto por tarjeta, por día</h3>
-      <div class="month-tabs" id="detail-month-tabs"></div>
+      <h3>💳 Gasto por tarjeta, por día</h3>
       <div class="chart-box" style="height:220px;"><canvas id="daily-flow-chart"></canvas></div>
       <div class="legend-col" id="daily-flow-legend" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-top:10px;"></div>
     </div>
 
-    <div id="category-by-method"></div>
-
     <div class="card">
-      <h3>Por método de pago</h3>
-      <div id="method-breakdown"></div>
-      <p class="empty-state hidden" id="method-empty">Aún no hay gastos este mes.</p>
+      <h3>Registro diario</h3>
+      <p class="helper-text">Toca un día para ver o agregar varios gastos de ese día.</p>
+      <div id="daily-register-table"></div>
     </div>
   </section>
 

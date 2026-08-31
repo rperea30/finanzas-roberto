@@ -8,7 +8,7 @@ import { openModal, closeModal } from './modal.js';
 import * as auth from './auth.js';
 import * as data from './data.js';
 
-const charts = { trend: null, donut: null, dailyFlow: null };
+const charts = { dailyFlow: null };
 
 // Meses que existen en la app (igual que las pestañas del Excel: Jun-Dic 2026).
 const MONTH_TAB_OPTIONS = [5, 6, 7, 8, 9, 10, 11].map((m) => new Date(2026, m, 1));
@@ -207,189 +207,95 @@ async function renderHome() {
   document.getElementById('topbar-title').textContent = 'Finanzas';
   document.getElementById('topbar-subtitle').textContent = state.household?.name || '';
 
-  const now = new Date();
-  const monthStart = startOfMonth(now);
-  const monthStartISO = monthStart.toISOString().slice(0, 10);
-  const prevMonthStartISO = addMonths(monthStart, -1).toISOString().slice(0, 10);
-  const todayIsoStr = todayISO();
-  const dayOfMonth = now.getDate();
+  renderMonthTabs('home-month-tabs', state.homeMonth, (m) => {
+    state.homeMonth = m;
+    renderHome();
+  });
 
-  let expenses = [];
-  let prevExpenses = [];
-  let incomeEntries = [];
-  let allIncomeEntries = [];
-  let allTransfers = [];
+  const monthStart = startOfMonth(state.homeMonth);
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+  const from = monthStart.toISOString().slice(0, 10);
+  const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1).toISOString().slice(0, 10);
+
+  let monthExpenses = [];
+  let allExpenses = [];
+  let monthIncome = [];
   try {
-    [expenses, prevExpenses, incomeEntries, allIncomeEntries, allTransfers] = await Promise.all([
-      data.fetchExpenses(state.household.id, { from: monthStartISO }),
-      data.fetchExpenses(state.household.id, { from: prevMonthStartISO, to: monthStartISO }),
-      data.fetchIncomeEntries(state.household.id, { from: monthStartISO }).catch(() => []),
-      data.fetchIncomeEntries(state.household.id).catch(() => []),
-      data.fetchWalletTransfers(state.household.id).catch(() => []),
+    [monthExpenses, allExpenses, monthIncome] = await Promise.all([
+      data.fetchExpenses(state.household.id, { from, to }),
+      data.fetchAllExpensesRaw(state.household.id),
+      data.fetchIncomeEntries(state.household.id, { from, to }).catch(() => []),
     ]);
-    state.expensesCache = expenses;
+    state.expensesCache = monthExpenses;
   } catch (err) {
-    showToast('Error cargando gastos: ' + err.message, 'error');
+    showToast('Error cargando datos: ' + err.message, 'error');
     return;
   }
 
-  const monthTotal = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const prevMonthTotal = prevExpenses.reduce((s, e) => s + Number(e.amount), 0);
-  const todayTotal = expenses
-    .filter((e) => e.expense_date === todayIsoStr)
-    .reduce((s, e) => s + Number(e.amount), 0);
-  const avgDaily = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
-
-  document.getElementById('stat-month-total').textContent = fmtMoney(monthTotal);
-  document.getElementById('stat-today-total').textContent = fmtMoney(todayTotal);
-  document.getElementById('stat-avg-daily').textContent = fmtMoney(avgDaily);
-
-  const receivedIncome = incomeEntries.reduce((s, e) => s + Number(e.amount), 0);
-  const targetIncome = state.incomeSources.reduce((s, i) => s + Number(i.monthly_amount), 0);
-  const budget = receivedIncome > 0 ? receivedIncome : targetIncome;
-  renderUnassignedCard(allIncomeEntries, allTransfers);
-  state.incomeMonth = startOfMonth(new Date());
-  renderIncomeMonthCard();
-  renderHeroTrend(monthTotal, prevMonthTotal, budget, receivedIncome > 0);
-  renderPaceCard(monthTotal, avgDaily, budget, now);
-  renderTrendChart(expenses, monthStart, now);
-
-  renderBreakdown(
-    'method-breakdown',
-    'method-empty',
-    groupSum(expenses, (e) => e.payment_methods?.name || 'Sin método', (e) => e.payment_methods?.color || '#6b7280', () => ''),
-    monthTotal
-  );
-
-  state.detailMonth = startOfMonth(new Date());
-  await renderExpenseDetailSection();
-  await renderHomeCardStrip();
+  renderMonthSummaryAndCycleTables(allExpenses, monthStart, monthEnd);
+  renderIncomeTable(monthIncome);
+  renderDailyFlowChart(monthExpenses, monthStart);
+  renderDailyRegisterTable(monthExpenses, monthStart);
   await renderTransfersList();
 }
 
-function renderHeroTrend(monthTotal, prevMonthTotal, budget, isReceived) {
-  const sub = document.getElementById('hero-budget-sub');
-  const gaugeContainer = document.getElementById('hero-gauge');
-  const fill = document.getElementById('hero-track-fill');
-  const leftLabel = document.getElementById('hero-track-label-left');
-  const rightLabel = document.getElementById('hero-track-label-right');
+function renderIncomeTable(monthIncome) {
+  const container = document.getElementById('income-table');
+  container.innerHTML = '';
 
-  if (budget > 0) {
-    const pct = (monthTotal / budget) * 100;
-    const level = gaugeLevel(pct);
-    fill.style.width = Math.min(100, pct) + '%';
-    fill.className = 'hero-track-fill level-' + level;
-    leftLabel.textContent = fmtMoney(monthTotal) + ' gastado';
-    rightLabel.textContent = 'de ' + fmtMoney(budget) + (isReceived ? ' recibidos' : ' de meta');
-    sub.textContent = pct >= 100
-      ? `Superaste tus ingresos por ${fmtMoney(monthTotal - budget)}`
-      : `Te quedan ${fmtMoney(budget - monthTotal)} este mes`;
-    sub.className = 'hero-sub ' + (pct >= 90 ? 'trend-up' : 'trend-down');
-    gaugeContainer.innerHTML = gaugeSVG(pct, { size: 'md' });
-    return;
+  const bySource = new Map();
+  for (const e of monthIncome) {
+    const name = e.income_sources?.name || 'Otro ingreso';
+    bySource.set(name, (bySource.get(name) || 0) + Number(e.amount));
   }
+  const total = monthIncome.reduce((s, e) => s + Number(e.amount), 0);
 
-  if (!prevMonthTotal) {
-    sub.textContent = 'Agrega tus ingresos en Ajustes para ver tu presupuesto';
-    sub.className = 'hero-sub';
+  const table = el(`
+    <div class="excel-table-wrap">
+      <table class="excel-table">
+        <thead><tr><th>Fuente</th><th>Recibido</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  `);
+  const body = table.querySelector('tbody');
+  if (!bySource.size) {
+    body.appendChild(el(`<tr><td colspan="2" style="color:var(--text-dim);">Sin ingresos este mes.</td></tr>`));
   } else {
-    const diffPct = ((monthTotal - prevMonthTotal) / prevMonthTotal) * 100;
-    const up = diffPct >= 0;
-    sub.textContent = `${up ? '▲' : '▼'} ${Math.abs(diffPct).toFixed(0)}% vs. mes anterior (${fmtMoney(prevMonthTotal)})`;
-    sub.className = 'hero-sub ' + (up ? 'trend-up' : 'trend-down');
-  }
-  const pct = prevMonthTotal > 0 ? Math.min(100, (monthTotal / prevMonthTotal) * 100) : monthTotal > 0 ? 100 : 0;
-  const level = prevMonthTotal > 0 ? gaugeLevel((monthTotal / prevMonthTotal) * 100) : 'good';
-  fill.style.width = pct + '%';
-  fill.className = 'hero-track-fill level-' + level;
-  leftLabel.textContent = fmtMoney(monthTotal) + ' gastado';
-  rightLabel.textContent = prevMonthTotal ? 'vs ' + fmtMoney(prevMonthTotal) + ' mes pasado' : 'primer mes de registro';
-  gaugeContainer.innerHTML = gaugeSVG(prevMonthTotal > 0 ? (monthTotal / prevMonthTotal) * 100 : monthTotal > 0 ? 100 : 0, { size: 'md' });
-}
-
-function renderUnassignedCard(allIncomeEntries, allTransfers) {
-  const totalIncome = allIncomeEntries.reduce((s, e) => s + Number(e.amount), 0);
-  const totalTransferred = allTransfers.reduce((s, t) => s + Number(t.amount), 0);
-  const unassigned = totalIncome - totalTransferred;
-
-  document.getElementById('unassigned-total').textContent = fmtMoney(unassigned);
-
-  const breakdown = document.getElementById('unassigned-breakdown');
-  breakdown.innerHTML = `
-    <div class="ub-row"><span>Ingresos recibidos (histórico)</span><strong>${fmtMoney(totalIncome)}</strong></div>
-    <div class="ub-row"><span>Transferido (histórico)</span><strong>-${fmtMoney(totalTransferred)}</strong></div>
-  `;
-
-  if (state.incomeSources.length) {
-    const perSource = document.createElement('div');
-    perSource.style.marginTop = '10px';
-    perSource.style.paddingTop = '10px';
-    perSource.style.borderTop = '1px solid var(--border)';
-    for (const src of state.incomeSources) {
-      const received = allIncomeEntries.filter((e) => e.income_source_id === src.id).reduce((s, e) => s + Number(e.amount), 0);
-      const transferred = allTransfers.filter((t) => t.income_source_id === src.id).reduce((s, t) => s + Number(t.amount), 0);
-      const left = received - transferred;
-      perSource.appendChild(
-        el(`<div class="ub-row"><span>${escapeHtml(src.name)} sin asignar</span><strong>${fmtMoney(left)}</strong></div>`)
-      );
+    for (const [name, amount] of bySource) {
+      body.appendChild(el(`<tr><td>${escapeHtml(name)}</td><td>${fmtMoney(amount)}</td></tr>`));
     }
-    breakdown.appendChild(perSource);
+    body.appendChild(el(`<tr style="font-weight:700;"><td>Total</td><td>${fmtMoney(total)}</td></tr>`));
   }
-}
+  container.appendChild(table);
 
-async function renderIncomeMonthCard() {
-  renderMonthTabs('income-month-tabs', state.incomeMonth, (m) => {
-    state.incomeMonth = m;
-    renderIncomeMonthCard();
-  });
-  const from = state.incomeMonth.toISOString().slice(0, 10);
-  const to = addMonths(state.incomeMonth, 1).toISOString().slice(0, 10);
-
-  let entries = [];
-  try {
-    entries = await data.fetchIncomeEntries(state.household.id, { from, to });
-  } catch (err) {
-    showToast('Error cargando ingresos: ' + err.message, 'error');
-    return;
-  }
-
-  const total = entries.reduce((s, e) => s + Number(e.amount), 0);
-  const groups = groupSum(
-    entries,
-    (e) => e.income_sources?.name || 'Otro ingreso',
-    (e) => e.income_sources?.color || '#22c55e',
-    () => '💵'
-  );
-  renderBreakdown('income-sources-breakdown', 'income-sources-empty', groups, total);
-
-  const titleEl = document.getElementById('income-entries-title');
-  const listEl = document.getElementById('income-entries-list');
-  listEl.innerHTML = '';
-  titleEl.textContent = entries.length ? 'Movimientos' : '';
-
-  const sorted = [...entries].sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1));
-  for (const e of sorted) {
-    const row = el(`
-      <div class="list-row">
-        <div class="row-main">
-          <span class="color-dot" style="background:${e.income_sources?.color || '#22c55e'}"></span>
-          <div>
-            <div>${escapeHtml(e.income_sources?.name || 'Otro ingreso')}${e.notes ? ' — ' + escapeHtml(e.notes) : ''}</div>
-            <div class="row-sub">${fmtDateLong(e.entry_date)}</div>
+  if (monthIncome.length) {
+    const list = el(`<div class="section-title" style="margin-left:0;">Movimientos</div>`);
+    container.appendChild(list);
+    const sorted = [...monthIncome].sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1));
+    for (const e of sorted) {
+      const row = el(`
+        <div class="list-row">
+          <div class="row-main">
+            <span class="color-dot" style="background:${e.income_sources?.color || '#22c55e'}"></span>
+            <div>
+              <div>${escapeHtml(e.income_sources?.name || 'Otro ingreso')}${e.notes ? ' — ' + escapeHtml(e.notes) : ''}</div>
+              <div class="row-sub">${fmtDateLong(e.entry_date)}</div>
+            </div>
+          </div>
+          <div class="row-actions" style="display:flex;align-items:center;gap:8px;">
+            <strong>${fmtMoney(e.amount)}</strong>
+            <button data-action="del">🗑️</button>
           </div>
         </div>
-        <div class="row-actions" style="display:flex;align-items:center;gap:8px;">
-          <strong>${fmtMoney(e.amount)}</strong>
-          <button data-action="del">🗑️</button>
-        </div>
-      </div>
-    `);
-    row.querySelector('[data-action="del"]').addEventListener('click', async () => {
-      if (!confirm('¿Eliminar este ingreso?')) return;
-      await data.deleteIncomeEntry(e.id);
-      renderIncomeMonthCard();
-    });
-    listEl.appendChild(row);
+      `);
+      row.querySelector('[data-action="del"]').addEventListener('click', async () => {
+        if (!confirm('¿Eliminar este ingreso?')) return;
+        await data.deleteIncomeEntry(e.id);
+        renderHome();
+      });
+      container.appendChild(row);
+    }
   }
 }
 
@@ -564,108 +470,6 @@ async function renderTransfersList() {
   }
 }
 
-function renderPaceCard(monthTotal, avgDaily, budget, now) {
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const dayOfMonth = now.getDate();
-  const daysLeft = Math.max(0, daysInMonth - dayOfMonth);
-  const projectedTotal = avgDaily * daysInMonth;
-
-  const safeDailyEl = document.getElementById('pace-safe-daily');
-  const daysLeftEl = document.getElementById('pace-days-left');
-  const projectionEl = document.getElementById('pace-projection');
-  const projectionNoteEl = document.getElementById('pace-projection-note');
-
-  if (budget > 0) {
-    const remaining = Math.max(0, budget - monthTotal);
-    const safeDaily = daysLeft > 0 ? remaining / daysLeft : remaining;
-    safeDailyEl.textContent = fmtMoney(safeDaily);
-    safeDailyEl.className = 'value ' + (monthTotal >= budget ? 'level-critical' : 'level-good');
-    daysLeftEl.textContent = daysLeft > 0 ? `para los próximos ${daysLeft} días` : 'último día del mes';
-
-    const projLevel = gaugeLevel((projectedTotal / budget) * 100);
-    projectionEl.textContent = fmtMoney(projectedTotal);
-    projectionEl.className = 'value level-' + projLevel;
-    projectionNoteEl.textContent = projectedTotal > budget
-      ? `${fmtMoney(projectedTotal - budget)} sobre tu presupuesto de ${fmtMoney(budget)}`
-      : `dentro de tu presupuesto de ${fmtMoney(budget)}`;
-  } else {
-    safeDailyEl.textContent = '—';
-    safeDailyEl.className = 'value';
-    daysLeftEl.textContent = 'agrega tus ingresos en Ajustes';
-    projectionEl.textContent = fmtMoney(projectedTotal);
-    projectionEl.className = 'value';
-    projectionNoteEl.textContent = `a un ritmo de ${fmtMoney(avgDaily)}/día`;
-  }
-}
-
-function renderTrendChart(expenses, monthStart, now) {
-  const daysInView = now.getDate();
-  const dailyTotals = new Array(daysInView).fill(0);
-  for (const e of expenses) {
-    const d = new Date(e.expense_date + 'T00:00:00');
-    if (d.getMonth() === monthStart.getMonth() && d.getFullYear() === monthStart.getFullYear()) {
-      const idx = d.getDate() - 1;
-      if (idx >= 0 && idx < daysInView) dailyTotals[idx] += Number(e.amount);
-    }
-  }
-  let running = 0;
-  const cumulative = dailyTotals.map((v) => (running += v));
-  const labels = cumulative.map((_, i) => String(i + 1));
-  const pointRadii = dailyTotals.map((v) => (v > 0 ? 5 : 0));
-
-  document.getElementById('trend-days-label').textContent = `${daysInView} días · toca un punto para ver el gasto`;
-
-  const ctx = document.getElementById('trend-chart');
-  if (charts.trend) charts.trend.destroy();
-  charts.trend = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        data: cumulative,
-        borderColor: '#3987e5',
-        backgroundColor: 'rgba(57,135,229,0.18)',
-        borderWidth: 2,
-        pointRadius: pointRadii,
-        pointHoverRadius: 7,
-        pointBackgroundColor: '#3987e5',
-        pointBorderColor: '#0b1220',
-        pointBorderWidth: 2,
-        tension: 0.35,
-        fill: true,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      onClick: (evt, elements) => {
-        if (!elements.length) return;
-        const idx = elements[0].index;
-        if (dailyTotals[idx] <= 0) return;
-        const d = new Date(monthStart);
-        d.setDate(idx + 1);
-        showDayExpensesModal(d.toISOString().slice(0, 10));
-      },
-      onHover: (evt, elements) => {
-        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            title: (items) => `Día ${items[0].label}`,
-            label: (item) => fmtMoney(item.parsed.y),
-            afterLabel: (item) => (dailyTotals[item.dataIndex] > 0 ? 'Toca para ver el detalle' : ''),
-          },
-        },
-      },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: '#93a4c3', maxTicksLimit: 6, font: { size: 10 } } },
-        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#93a4c3', font: { size: 10 }, callback: (v) => '$' + v } },
-      },
-    },
-  });
-}
 
 function showDayExpensesModal(dateISO) {
   const dayExpenses = state.expensesCache.filter((e) => e.expense_date === dateISO);
@@ -689,6 +493,7 @@ function showDayExpensesModal(dateISO) {
     <h3>${fmtDateLong(dateISO)}</h3>
     <p class="helper-text">Total del día: ${fmtMoney(dayTotal)}</p>
     ${rows || '<p class="empty-state">Sin gastos ese día.</p>'}
+    <button class="btn btn-secondary" id="day-modal-add" style="margin-top:14px;">+ Agregar gasto este día</button>
   `);
   overlay.querySelectorAll('.list-row').forEach((row) => {
     row.addEventListener('click', () => {
@@ -696,27 +501,15 @@ function showDayExpensesModal(dateISO) {
       if (exp) openExpenseDetail(exp);
     });
   });
-}
-
-async function renderExpenseDetailSection() {
-  renderMonthTabs('detail-month-tabs', state.detailMonth, (m) => {
-    state.detailMonth = m;
-    renderExpenseDetailSection();
+  overlay.querySelector('#day-modal-add').addEventListener('click', () => {
+    closeModal();
+    state.editingExpenseId = null;
+    resetExpenseForm();
+    document.getElementById('exp-date').value = dateISO;
+    setActiveView('add');
   });
-  const from = state.detailMonth.toISOString().slice(0, 10);
-  const to = addMonths(state.detailMonth, 1).toISOString().slice(0, 10);
-
-  let monthExpenses = [];
-  try {
-    monthExpenses = await data.fetchExpenses(state.household.id, { from, to });
-  } catch (err) {
-    showToast('Error cargando el detalle: ' + err.message, 'error');
-    return;
-  }
-
-  renderDailyFlowChart(monthExpenses, state.detailMonth);
-  renderCategoryByMethod(monthExpenses);
 }
+
 
 function renderDailyFlowChart(monthExpenses, monthStart) {
   const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
@@ -769,85 +562,17 @@ function renderDailyFlowChart(monthExpenses, monthStart) {
   });
 }
 
-function renderCategoryByMethod(allExpenses) {
-  const container = document.getElementById('category-by-method');
-  container.innerHTML = '';
-
-  const usedMethodIds = new Set(allExpenses.map((e) => e.payment_method_id).filter(Boolean));
-  const methods = state.paymentMethods.filter((m) => usedMethodIds.has(m.id));
-
-  if (!methods.length) {
-    container.appendChild(el(`<p class="empty-state">Sin gastos en ${monthLabel(state.detailMonth)}.</p>`));
-    return;
-  }
-
-  for (const m of methods) {
-    const methodExpenses = allExpenses.filter((e) => e.payment_method_id === m.id);
-    const methodTotal = methodExpenses.reduce((s, e) => s + Number(e.amount), 0);
-
-    const card = el(`
-      <div class="card">
-        <div class="card-head">
-          <h3><span class="color-dot" style="background:${m.color};display:inline-block;margin-right:6px;"></span>${escapeHtml(m.name)}</h3>
-          <span class="helper-text">${fmtMoney(methodTotal)}</span>
-        </div>
-        <div class="method-cat-list"></div>
-      </div>
-    `);
-
-    const listEl = card.querySelector('.method-cat-list');
-    const sorted = [...methodExpenses].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1));
-
-    let lastDay = null;
-    for (const exp of sorted) {
-      if (exp.expense_date !== lastDay) {
-        lastDay = exp.expense_date;
-        const dayTotal = sorted.filter((e) => e.expense_date === lastDay).reduce((s, e) => s + Number(e.amount), 0);
-        listEl.appendChild(el(`
-          <div class="day-group-label" style="display:flex;justify-content:space-between;">
-            <span>${fmtDateLong(lastDay)}</span>
-            <span>Total del día: ${fmtMoney(dayTotal)}</span>
-          </div>
-        `));
-      }
-      const row = el(`
-        <div class="list-row" style="cursor:pointer;">
-          <div class="row-main">
-            <span class="color-dot" style="background:${exp.categories?.color || '#6b7280'}"></span>
-            <div>
-              <div>${exp.categories?.icon || '💸'} ${escapeHtml(exp.merchant || exp.categories?.name || 'Gasto')}</div>
-              <div class="row-sub">${escapeHtml(exp.categories?.name || '')}</div>
-            </div>
-          </div>
-          <strong>${fmtMoney(exp.amount)}</strong>
-        </div>
-      `);
-      row.addEventListener('click', () => openExpenseDetail(exp));
-      listEl.appendChild(row);
-    }
-
-    container.appendChild(card);
-  }
-}
-
-// Ciclo de facturación vigente para un método de pago (como "CICLO VIGENTE" del Excel).
+// Ciclo de facturación vigente para un método de pago (como "CICLO VIGENTE" del Excel),
+// calculado a partir del mes seleccionado (no de "hoy"), igual que cada hoja mensual del Excel.
 // Tarjetas: día siguiente al corte -> día de corte del mes siguiente. Efectivo/wallet: mes calendario.
-function getCycleRange(method, today) {
+function getCycleRange(method, monthStart) {
   const closeDay = method.cycle_close_day;
   if (!closeDay || method.type === 'cash' || method.type === 'wallet') {
-    const start = startOfMonth(today);
-    const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    return { start, end };
+    const end = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+    return { start: monthStart, end };
   }
-  const day = today.getDate();
-  let start, end;
-  if (day > closeDay) {
-    start = new Date(today.getFullYear(), today.getMonth(), closeDay + 1);
-    end = new Date(today.getFullYear(), today.getMonth() + 1, closeDay);
-  } else {
-    start = new Date(today.getFullYear(), today.getMonth() - 1, closeDay + 1);
-    end = new Date(today.getFullYear(), today.getMonth(), closeDay);
-  }
+  const start = new Date(monthStart.getFullYear(), monthStart.getMonth(), closeDay + 1);
+  const end = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, closeDay);
   return { start, end };
 }
 
@@ -866,37 +591,27 @@ function estadoChip(pct) {
   return { text: 'OK', cls: 'pagado' };
 }
 
-async function renderHomeCardStrip() {
-  const strip = document.getElementById('home-card-strip');
-  const emptyEl = document.getElementById('home-card-strip-empty');
-  strip.innerHTML = '';
+function renderMonthSummaryAndCycleTables(allExpenses, monthStart, monthEnd) {
+  const summaryContainer = document.getElementById('month-summary-table');
+  const cycleContainer = document.getElementById('cycle-table');
+  summaryContainer.innerHTML = '';
+  cycleContainer.innerHTML = '';
 
   if (!state.paymentMethods.length) {
-    emptyEl.classList.remove('hidden');
+    const msg = '<p class="empty-state">Agrega tarjetas o wallets en Ajustes para verlas aquí.</p>';
+    summaryContainer.innerHTML = msg;
+    cycleContainer.innerHTML = msg;
     return;
   }
-  emptyEl.classList.add('hidden');
-
-  let allExpenses = [];
-  try {
-    allExpenses = await data.fetchAllExpensesRaw(state.household.id);
-  } catch {
-    allExpenses = [];
-  }
-
-  const today = new Date();
-  const monthStart = startOfMonth(today);
-  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
   const rows = state.paymentMethods.map((m) => {
     const limit = m.credit_limit != null ? Number(m.credit_limit) : m.starting_balance != null ? Number(m.starting_balance) : 0;
     const monthSpent = sumExpensesInRange(allExpenses, m.id, monthStart, monthEnd);
-    const cycle = getCycleRange(m, today);
+    const cycle = getCycleRange(m, monthStart);
     const cycleSpent = sumExpensesInRange(allExpenses, m.id, cycle.start, cycle.end);
     return { m, limit, monthSpent, cycle, cycleSpent };
   });
 
-  // ---- Tabla 1: Resumen del mes por wallet ----
   const monthTable = el(`
     <div class="excel-table-wrap">
       <table class="excel-table">
@@ -921,8 +636,8 @@ async function renderHomeCardStrip() {
       </tr>
     `));
   }
+  summaryContainer.appendChild(monthTable);
 
-  // ---- Tabla 2: Ciclo vigente ----
   const cycleTable = el(`
     <div class="excel-table-wrap">
       <table class="excel-table">
@@ -948,44 +663,66 @@ async function renderHomeCardStrip() {
       </tr>
     `));
   }
-
-  strip.appendChild(el(`<div class="section-title" style="margin-left:0;">Resumen del mes por wallet</div>`));
-  strip.appendChild(monthTable);
-  strip.appendChild(el(`<div class="section-title" style="margin-left:0;">Ciclo vigente</div>`));
-  strip.appendChild(cycleTable);
+  cycleContainer.appendChild(cycleTable);
 }
 
-function groupSum(expenses, keyFn, colorFn, iconFn) {
-  const map = new Map();
-  for (const e of expenses) {
-    const key = keyFn(e);
-    if (!map.has(key)) map.set(key, { name: key, total: 0, color: colorFn(e), icon: iconFn(e) });
-    map.get(key).total += Number(e.amount);
-  }
-  return [...map.values()].sort((a, b) => b.total - a.total);
-}
-
-function renderBreakdown(listId, emptyId, groups, total) {
-  const container = document.getElementById(listId);
-  const emptyEl = document.getElementById(emptyId);
+function renderDailyRegisterTable(monthExpenses, monthStart) {
+  const container = document.getElementById('daily-register-table');
   container.innerHTML = '';
-  if (!groups.length) {
-    emptyEl.classList.remove('hidden');
+
+  if (!state.paymentMethods.length) {
+    container.appendChild(el(`<p class="empty-state">Agrega tarjetas o wallets en Ajustes primero.</p>`));
     return;
   }
-  emptyEl.classList.add('hidden');
-  for (const g of groups) {
-    const pct = total > 0 ? Math.round((g.total / total) * 100) : 0;
-    container.appendChild(
-      el(`
-      <div class="category-bar-row">
-        <div class="cat-name">${g.icon ? g.icon + ' ' : ''}${escapeHtml(g.name)}</div>
-        <div class="category-bar-track"><div class="category-bar-fill" style="width:${pct}%;background:${g.color}"></div></div>
-        <div class="cat-amount">${fmtMoney(g.total)}</div>
-      </div>
-    `)
-    );
+
+  const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
+  const methods = state.paymentMethods;
+
+  const table = el(`
+    <div class="excel-table-wrap">
+      <table class="excel-table">
+        <thead><tr>
+          <th>Fecha</th>
+          ${methods.map((m) => `<th>${escapeHtml(m.name)}</th>`).join('')}
+          <th>Total del día</th>
+          <th>Detalle / Comercio</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  `);
+  const tbody = table.querySelector('tbody');
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(monthStart.getFullYear(), monthStart.getMonth(), day);
+    const dateISO = d.toISOString().slice(0, 10);
+    const dayExpenses = monthExpenses.filter((e) => e.expense_date === dateISO);
+    const dayTotal = dayExpenses.reduce((s, e) => s + Number(e.amount), 0);
+
+    const methodCells = methods
+      .map((m) => {
+        const sum = dayExpenses.filter((e) => e.payment_method_id === m.id).reduce((s, e) => s + Number(e.amount), 0);
+        return `<td>${sum > 0 ? fmtMoney(sum) : '—'}</td>`;
+      })
+      .join('');
+
+    let detailText = '—';
+    if (dayExpenses.length === 1) detailText = escapeHtml(dayExpenses[0].merchant || dayExpenses[0].categories?.name || 'Gasto');
+    else if (dayExpenses.length > 1) detailText = `${dayExpenses.length} compras`;
+
+    const row = el(`
+      <tr style="cursor:pointer;">
+        <td>${capitalize(d.toLocaleDateString('es-PA', { weekday: 'short', day: 'numeric', month: 'short' })).replace('.', '')}</td>
+        ${methodCells}
+        <td><strong>${dayTotal > 0 ? fmtMoney(dayTotal) : '—'}</strong></td>
+        <td>${detailText}</td>
+      </tr>
+    `);
+    row.addEventListener('click', () => showDayExpensesModal(dateISO));
+    tbody.appendChild(row);
   }
+
+  container.appendChild(table);
 }
 
 /* ======================================================================
